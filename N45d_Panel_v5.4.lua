@@ -1,0 +1,4961 @@
+--========================================================
+-- N45d PANEL v5.4 | MODULAR CONTROL CENTER
+-- Single LocalScript | Mobile + PC
+--========================================================
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local TextChatService = game:GetService("TextChatService")
+local SoundService = game:GetService("SoundService")
+local TeleportService = game:GetService("TeleportService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local oldGui = playerGui:FindFirstChild("N45dPanel")
+if oldGui then
+    oldGui:Destroy()
+end
+
+--========================================================
+-- SETTINGS
+--========================================================
+
+local defaults = {
+    speed = 16,
+    jump = 50,
+    gravity = 196.2,
+    sprint = 26,
+    flySpeed = 35,
+    dashPower = 72,
+    swimSpeed = 24,
+
+    fov = 70,
+    zoomMin = 0.5,
+    zoomMax = 128,
+
+    uiScale = 1,
+    transparency = 0,
+    outline = 2,
+    radius = 12,
+    textSize = 13,
+
+    animationSpeed = 0.65,
+    animations = true,
+    panelAnimation = true,
+    borderAnimation = true,
+    buttonAnimation = true,
+    floatingAnimation = true,
+    reduceMotion = false,
+    performanceMode = false,
+
+    theme = 1,
+    font = 1,
+    accentHex = "",
+    simpleUI = false,
+
+    keybind = "RightShift",
+
+    replyKeyword = "",
+    replyText = "",
+    chatCooldown = 12
+}
+
+local settings = {}
+
+for key, defaultValue in pairs(defaults) do
+    local saved = player:GetAttribute("N45d_" .. key)
+    settings[key] = saved ~= nil and saved or defaultValue
+end
+
+local state = {
+    closed = false,
+    minimized = false,
+    maximized = false,
+    simple = false,
+
+    flying = false,
+    noclip = false,
+    infiniteJump = false,
+    invisible = false,
+    remoteHide = false,
+    spectating = false,
+    sprinting = false,
+    autoChat = false,
+
+    dashReady = true
+}
+
+local selectedPlayer
+local currentTab = "Dashboard"
+local settingsPage = "Appearance"
+
+local flyVertical = 0
+local lastReply = 0
+local lastSpectateUpdate = 0
+local lastAnimationUpdate = 0
+local animationTime = 0
+
+local originalGravity = workspace.Gravity
+local originalMinZoom = player.CameraMinZoomDistance
+local originalMaxZoom = player.CameraMaxZoomDistance
+
+local originalCamera = workspace.CurrentCamera
+local originalFov = originalCamera and originalCamera.FieldOfView
+local originalCameraSubject = originalCamera and originalCamera.CameraSubject
+
+local connections = {}
+
+local collisionCache = {}
+local transparencyCache = {}
+
+local movementOriginals = setmetatable({}, {__mode = "k"})
+
+local noclipConnection
+local invisibleConnection
+local viewportConnection
+
+local activePlayerRefresh
+local tabButtons = {}
+local textObjects = setmetatable({}, {__mode = "k"})
+
+local capturingKey = false
+local keyCaptureButton
+local simpleBar
+local simpleToggleButton
+local quickActions
+local teleportTool
+local teleportToolConnection
+local resizeGrip
+local spectatePicker
+local previewSound
+local audioVolume = 0.65
+local dashCharacter, resetCharacter, toggleSelectedSpectate, ensureTeleportTool, setRemoteHide, openSpectatePicker
+local simpleRemoteButton
+local quickRemoteButton
+local remoteControls
+local remoteHideData
+local remoteCameraAnchor
+local remotePlayerControls
+local remoteCameraRadius = 36
+local layoutSimpleBar
+local lastServerTeleport
+local serverJoinBox
+
+local function connect(signal, callback)
+    local connection = signal:Connect(callback)
+    table.insert(connections, connection)
+    return connection
+end
+
+local function saveSettings()
+    for key, value in pairs(settings) do
+        pcall(function()
+            player:SetAttribute("N45d_" .. key, value)
+        end)
+    end
+end
+
+--========================================================
+-- THEMES
+--========================================================
+
+local themes = {
+    {
+        bg = Color3.fromRGB(5, 8, 17),
+        panel = Color3.fromRGB(9, 16, 33),
+        side = Color3.fromRGB(12, 22, 43),
+        card = Color3.fromRGB(17, 30, 54),
+
+        blue = Color3.fromRGB(35, 76, 145),
+        light = Color3.fromRGB(85, 130, 185),
+
+        text = Color3.fromRGB(205, 215, 235),
+        muted = Color3.fromRGB(125, 145, 175),
+
+        green = Color3.fromRGB(95, 155, 120),
+        active = Color3.fromRGB(19, 43, 39)
+    },
+
+    {
+        bg = Color3.fromRGB(10, 10, 18),
+        panel = Color3.fromRGB(17, 18, 31),
+        side = Color3.fromRGB(25, 25, 43),
+        card = Color3.fromRGB(35, 35, 58),
+
+        blue = Color3.fromRGB(105, 75, 160),
+        light = Color3.fromRGB(155, 125, 210),
+
+        text = Color3.fromRGB(225, 215, 240),
+        muted = Color3.fromRGB(155, 145, 175),
+
+        green = Color3.fromRGB(100, 160, 130),
+        active = Color3.fromRGB(25, 48, 40)
+    },
+
+    {
+        bg = Color3.fromRGB(5, 14, 16),
+        panel = Color3.fromRGB(8, 24, 27),
+        side = Color3.fromRGB(12, 35, 39),
+        card = Color3.fromRGB(17, 47, 51),
+
+        blue = Color3.fromRGB(35, 115, 120),
+        light = Color3.fromRGB(90, 175, 175),
+
+        text = Color3.fromRGB(205, 230, 230),
+        muted = Color3.fromRGB(125, 165, 165),
+
+        green = Color3.fromRGB(85, 155, 120),
+        active = Color3.fromRGB(18, 48, 40)
+    },
+
+    {
+        bg = Color3.fromRGB(15, 8, 13),
+        panel = Color3.fromRGB(28, 13, 25),
+        side = Color3.fromRGB(42, 19, 37),
+        card = Color3.fromRGB(55, 27, 48),
+
+        blue = Color3.fromRGB(145, 55, 110),
+        light = Color3.fromRGB(195, 105, 160),
+
+        text = Color3.fromRGB(240, 215, 230),
+        muted = Color3.fromRGB(175, 135, 160),
+
+        green = Color3.fromRGB(100, 155, 115),
+        active = Color3.fromRGB(28, 45, 34)
+    }
+}
+
+local fonts = {
+    Enum.Font.Gotham,
+    Enum.Font.GothamMedium,
+    Enum.Font.GothamBold,
+    Enum.Font.SourceSans,
+    Enum.Font.Code
+}
+
+local C
+
+local function parseHex(value)
+    if type(value) ~= "string" then
+        return nil
+    end
+
+    local hex = value:gsub("#", "")
+
+    if #hex ~= 6 then
+        return nil
+    end
+
+    local r = tonumber(hex:sub(1, 2), 16)
+    local g = tonumber(hex:sub(3, 4), 16)
+    local b = tonumber(hex:sub(5, 6), 16)
+
+    if not r or not g or not b then
+        return nil
+    end
+
+    return Color3.fromRGB(r, g, b)
+end
+
+local function buildTheme()
+    local source = themes[math.clamp(settings.theme, 1, #themes)]
+
+    C = {}
+
+    for key, value in pairs(source) do
+        C[key] = value
+    end
+
+    local custom = parseHex(settings.accentHex)
+
+    if custom then
+        C.blue = custom
+        C.light = custom:Lerp(Color3.new(1, 1, 1), 0.25)
+    end
+end
+
+buildTheme()
+
+--========================================================
+-- CHARACTER HELPERS
+--========================================================
+
+local function character()
+    return player.Character
+end
+
+local function humanoid()
+    local c = character()
+    return c and c:FindFirstChildOfClass("Humanoid")
+end
+
+local function root()
+    local c = character()
+    return c and c:FindFirstChild("HumanoidRootPart")
+end
+
+local function captureMovement(h)
+    h = h or humanoid()
+    if not h then return end
+
+    if not movementOriginals[h] then
+        movementOriginals[h] = {
+            speed = h.WalkSpeed,
+            jump = h.JumpPower,
+            useJump = h.UseJumpPower
+        }
+    end
+end
+
+local function applyMovement()
+    local h = humanoid()
+    if not h then return end
+
+    captureMovement(h)
+
+    h.UseJumpPower = true
+    h.JumpPower = settings.jump
+
+    if state.sprinting then
+        h.WalkSpeed = settings.sprint
+    elseif h:GetState() == Enum.HumanoidStateType.Swimming then
+        h.WalkSpeed = settings.swimSpeed
+    else
+        h.WalkSpeed = settings.speed
+    end
+end
+
+captureMovement()
+
+--==================================================
+-- CHARACTER LOCAL EFFECTS
+--==================================================
+
+local function setNoclip(enabled)
+    state.noclip = enabled
+
+    if noclipConnection then
+        noclipConnection:Disconnect()
+        noclipConnection = nil
+    end
+
+    if not enabled then
+        for part, oldValue in pairs(collisionCache) do
+            if part.Parent then
+                part.CanCollide = oldValue
+            end
+        end
+
+        table.clear(collisionCache)
+        return
+    end
+
+    local c = character()
+    if not c then return end
+
+    local function apply(part)
+        if not part:IsA("BasePart") then return end
+
+        if collisionCache[part] == nil then
+            collisionCache[part] = part.CanCollide
+        end
+
+        part.CanCollide = false
+    end
+
+    for _, part in ipairs(c:GetDescendants()) do
+        apply(part)
+    end
+
+    noclipConnection = c.DescendantAdded:Connect(apply)
+end
+
+local function setInvisible(enabled)
+    state.invisible = enabled
+
+    if invisibleConnection then
+        invisibleConnection:Disconnect()
+        invisibleConnection = nil
+    end
+
+    if not enabled then
+        for part, oldValue in pairs(transparencyCache) do
+            if part.Parent then
+                part.LocalTransparencyModifier = oldValue
+            end
+        end
+
+        table.clear(transparencyCache)
+        return
+    end
+
+    local c = character()
+    if not c then return end
+
+    local function apply(part)
+        if not part:IsA("BasePart") then return end
+
+        if transparencyCache[part] == nil then
+            transparencyCache[part] = part.LocalTransparencyModifier
+        end
+
+        part.LocalTransparencyModifier = 1
+    end
+
+    for _, part in ipairs(c:GetDescendants()) do
+        apply(part)
+    end
+
+    invisibleConnection = c.DescendantAdded:Connect(apply)
+end
+
+--==================================================
+-- SPECTATE SYSTEM
+--==================================================
+
+local function stopSpectating()
+    state.spectating = false
+
+    local camera = workspace.CurrentCamera
+    if not camera then return end
+
+    local h = humanoid()
+
+    if originalCameraSubject and originalCameraSubject.Parent then
+        camera.CameraSubject = originalCameraSubject
+    else
+        camera.CameraSubject = h
+    end
+end
+
+local function spectate(target)
+    if not target or target == player then
+        return false, "Select another player first."
+    end
+
+    local c = target.Character
+    local h = c and c:FindFirstChildOfClass("Humanoid")
+
+    if not h then
+        return false, "The selected player has no active character."
+    end
+
+    local camera = workspace.CurrentCamera
+    if not camera then
+        return false, "Camera unavailable."
+    end
+
+    if not state.spectating then
+        originalCameraSubject = camera.CameraSubject
+    end
+
+    selectedPlayer = target
+    camera.CameraSubject = h
+    state.spectating = true
+
+    return true, "Spectating " .. target.DisplayName
+end
+
+--==================================================
+-- GUI HELPERS
+--==================================================
+
+local function create(class, properties, parent)
+    local object = Instance.new(class)
+
+    for key, value in pairs(properties or {}) do
+        object[key] = value
+    end
+
+    object.Parent = parent
+    return object
+end
+
+local function corner(object, radius)
+    return create("UICorner", {
+        CornerRadius = UDim.new(0, radius or settings.radius)
+    }, object)
+end
+
+local function outline(object, color, thickness)
+    return create("UIStroke", {
+        Color = color or C.blue,
+        Thickness = thickness or settings.outline,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    }, object)
+end
+
+local function trackText(object, size)
+    textObjects[object] = size or settings.textSize
+
+    object.Font = fonts[settings.font] or fonts[1]
+    object.TextSize = size or settings.textSize
+
+    return object
+end
+
+local function applyTextSettings()
+    for object, baseSize in pairs(textObjects) do
+        if object.Parent then
+            object.Font = fonts[settings.font] or fonts[1]
+
+            local scale = settings.textSize / 13
+            object.TextSize = math.clamp(baseSize * scale, 8, 25)
+        end
+    end
+end
+
+local function makeLabel(parent, text, height, size)
+    local label = create("TextLabel", {
+        Size = UDim2.new(1, -4, 0, height or 24),
+        BackgroundTransparency = 1,
+
+        Text = text,
+        TextColor3 = C.text,
+
+        Font = fonts[settings.font],
+        TextSize = size or settings.textSize,
+
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Center,
+
+        TextWrapped = true
+    }, parent)
+
+    trackText(label, size or settings.textSize)
+
+    return label
+end
+
+local function animate(object, properties, duration)
+    if settings.reduceMotion or not settings.animations then
+        for key, value in pairs(properties) do
+            object[key] = value
+        end
+        return
+    end
+
+    local tween = TweenService:Create(
+        object,
+        TweenInfo.new(
+            duration or 0.16,
+            Enum.EasingStyle.Quint,
+            Enum.EasingDirection.Out
+        ),
+        properties
+    )
+
+    tween:Play()
+    return tween
+end
+
+--==================================================
+-- SCREEN GUI
+--==================================================
+
+local gui = create("ScreenGui", {
+    Name = "N45dPanel",
+    ResetOnSpawn = false,
+    DisplayOrder = 100,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+}, playerGui)
+
+local main = create("Frame", {
+    Name = "Main",
+    Size = UDim2.fromOffset(560, 460),
+    Position = UDim2.fromScale(0.5, 0.5),
+    AnchorPoint = Vector2.new(0.5, 0.5),
+
+    BackgroundColor3 = C.bg,
+    BorderSizePixel = 0,
+
+    Active = true,
+    ClipsDescendants = true
+}, gui)
+
+corner(main, 16)
+local mainStroke = outline(main, C.blue, settings.outline)
+
+local uiScale = create("UIScale", {
+    Scale = settings.uiScale
+}, main)
+
+--==================================================
+-- FLOATING N BUTTON
+--==================================================
+
+local floating = create("TextButton", {
+    Name = "FloatingN45d",
+
+    Size = UDim2.fromOffset(62, 62),
+    Position = UDim2.new(0, 18, 0.5, 0),
+    AnchorPoint = Vector2.new(0, 0.5),
+
+    BackgroundTransparency = 1,
+    Text = "",
+
+    AutoButtonColor = false,
+    Active = true,
+    Visible = false,
+    ZIndex = 30
+}, gui)
+
+local floatingCircle = create("Frame", {
+    Size = UDim2.fromScale(1, 1),
+    BackgroundColor3 = C.panel,
+    BorderSizePixel = 0,
+    ZIndex = 30
+}, floating)
+
+corner(floatingCircle, 100)
+
+local floatingStroke = outline(floatingCircle, C.blue, 4)
+
+create("TextLabel", {
+    Size = UDim2.fromScale(1, 1),
+    BackgroundTransparency = 1,
+
+    Text = "N",
+    TextColor3 = C.light,
+
+    Font = Enum.Font.GothamBold,
+    TextSize = 29,
+
+    ZIndex = 31
+}, floatingCircle)
+
+--==================================================
+-- HEADER
+--==================================================
+
+local header = create("Frame", {
+    Position = UDim2.fromOffset(10, 7),
+    Size = UDim2.new(1, -20, 0, 54),
+    BackgroundTransparency = 1
+}, main)
+
+local dragHandle = create("TextButton", {
+    Position = UDim2.fromOffset(58, 0),
+    Size = UDim2.new(1, -164, 1, 0),
+
+    BackgroundTransparency = 1,
+    Text = "",
+
+    AutoButtonColor = false,
+    Active = true,
+    ZIndex = 2
+}, header)
+
+local logo = create("Frame", {
+    Position = UDim2.fromOffset(1, 5),
+    Size = UDim2.fromOffset(44, 44),
+
+    BackgroundColor3 = C.panel,
+    BorderSizePixel = 0
+}, header)
+
+corner(logo, 100)
+local logoStroke = outline(logo, C.blue, 2)
+
+create("TextLabel", {
+    Size = UDim2.fromScale(1, 1),
+    BackgroundTransparency = 1,
+
+    Text = "N",
+    TextColor3 = C.light,
+
+    Font = Enum.Font.GothamBold,
+    TextSize = 23
+}, logo)
+
+local title = makeLabel(header, "N45d Panel", 25, 19)
+title.Position = UDim2.fromOffset(55, 4)
+title.Size = UDim2.new(1, -200, 0, 25)
+
+local subtitle = makeLabel(header, "MODULAR CONTROL CENTER", 17, 9)
+subtitle.Position = UDim2.fromOffset(56, 29)
+subtitle.Size = UDim2.new(1, -200, 0, 17)
+subtitle.TextColor3 = C.muted
+
+local function headerButton(text, rightOffset, callback)
+    local button = create("TextButton", {
+        Position = UDim2.new(1, rightOffset, 0, 10),
+        Size = UDim2.fromOffset(31, 31),
+
+        BackgroundColor3 = C.card,
+
+        Text = text,
+        TextColor3 = C.light,
+
+        Font = Enum.Font.GothamBold,
+        TextSize = 17,
+
+        AutoButtonColor = false,
+        Active = true
+    }, header)
+
+    corner(button, 8)
+    outline(button, C.blue, 1)
+
+    button.Activated:Connect(callback)
+
+    return button
+end
+
+--==================================================
+-- MAIN LAYOUT
+--==================================================
+
+local dividerTop = create("Frame", {
+    Position = UDim2.fromOffset(11, 68),
+    Size = UDim2.new(1, -22, 0, 1),
+
+    BackgroundColor3 = C.blue,
+    BackgroundTransparency = 0.35,
+    BorderSizePixel = 0
+}, main)
+
+local sidebar = create("ScrollingFrame", {
+    Position = UDim2.fromOffset(11, 79),
+    Size = UDim2.new(0, 125, 1, -119),
+
+    BackgroundColor3 = C.side,
+    BorderSizePixel = 0,
+
+    ScrollBarThickness = 3,
+    ScrollBarImageColor3 = C.blue,
+
+    AutomaticCanvasSize = Enum.AutomaticSize.Y,
+    CanvasSize = UDim2.new(),
+
+    Active = true
+}, main)
+
+corner(sidebar, 11)
+
+local tabList = create("Frame", {
+    Position = UDim2.fromOffset(5, 5),
+    Size = UDim2.new(1, -10, 0, 0),
+
+    BackgroundTransparency = 1,
+    AutomaticSize = Enum.AutomaticSize.Y
+}, sidebar)
+
+local tabLayout = create("UIListLayout", {
+    Padding = UDim.new(0, 5),
+    SortOrder = Enum.SortOrder.LayoutOrder
+}, tabList)
+
+local searchFrame = create("Frame", {
+    Position = UDim2.fromOffset(145, 79),
+    Size = UDim2.new(1, -156, 0, 32),
+
+    BackgroundColor3 = C.card,
+    BorderSizePixel = 0
+}, main)
+
+corner(searchFrame, 9)
+outline(searchFrame, C.blue, 1)
+
+local globalSearch = create("TextBox", {
+    Position = UDim2.fromOffset(9, 0),
+    Size = UDim2.new(1, -48, 1, 0),
+
+    BackgroundTransparency = 1,
+
+    Text = "",
+    PlaceholderText = "Search features...",
+    PlaceholderColor3 = C.muted,
+
+    TextColor3 = C.text,
+    Font = fonts[settings.font],
+    TextSize = 11,
+
+    ClearTextOnFocus = false,
+    TextXAlignment = Enum.TextXAlignment.Left
+}, searchFrame)
+
+trackText(globalSearch, 11)
+
+local searchButton = create("TextButton", {
+    Position = UDim2.new(1, -36, 0, 3),
+    Size = UDim2.fromOffset(31, 26),
+
+    BackgroundColor3 = C.side,
+
+    Text = "⌕",
+    TextColor3 = C.light,
+    Font = Enum.Font.GothamBold,
+    TextSize = 17,
+
+    AutoButtonColor = false
+}, searchFrame)
+
+corner(searchButton, 7)
+
+local content = create("ScrollingFrame", {
+    Position = UDim2.fromOffset(145, 119),
+    Size = UDim2.new(1, -156, 1, -159),
+
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+
+    ScrollBarThickness = 3,
+    ScrollBarImageColor3 = C.blue,
+
+    AutomaticCanvasSize = Enum.AutomaticSize.Y,
+    CanvasSize = UDim2.new(),
+
+    Active = true,
+    ScrollingDirection = Enum.ScrollingDirection.Y
+}, main)
+
+local contentPadding = create("UIPadding", {
+    PaddingRight = UDim.new(0, 5),
+    PaddingBottom = UDim.new(0, 12)
+}, content)
+
+local contentLayout = create("UIListLayout", {
+    Padding = UDim.new(0, 8),
+    SortOrder = Enum.SortOrder.LayoutOrder
+}, content)
+
+local dividerBottom = create("Frame", {
+    Position = UDim2.new(0, 11, 1, -34),
+    Size = UDim2.new(1, -22, 0, 1),
+
+    BackgroundColor3 = C.blue,
+    BackgroundTransparency = 0.4,
+    BorderSizePixel = 0
+}, main)
+
+local footer = makeLabel(main, "N45d  •  Version 5.4", 19, 9)
+footer.Position = UDim2.new(0, 14, 1, -29)
+footer.TextColor3 = C.muted
+
+--==================================================
+-- TOAST NOTIFICATIONS
+--==================================================
+
+local toastLayer = create("Frame", {
+    Size = UDim2.fromScale(1, 1),
+    BackgroundTransparency = 1,
+    ZIndex = 100,
+    Active = false
+}, gui)
+
+local function notify(message, kind)
+    if state.closed or not toastLayer.Parent then return end
+
+    local color = C.blue
+
+    if kind == "success" then
+        color = C.green
+    elseif kind == "error" then
+        color = Color3.fromRGB(175, 85, 85)
+    end
+
+    local toast = create("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0),
+        Position = UDim2.new(0.5, 0, 0, -55),
+        Size = UDim2.new(0.82, 0, 0, 42),
+
+        BackgroundColor3 = C.card,
+        BackgroundTransparency = 0.04,
+
+        ZIndex = 101
+    }, toastLayer)
+
+    corner(toast, 10)
+    outline(toast, color, 1)
+
+    local label = create("TextLabel", {
+        Position = UDim2.fromOffset(10, 0),
+        Size = UDim2.new(1, -20, 1, 0),
+
+        BackgroundTransparency = 1,
+
+        Text = tostring(message),
+        TextColor3 = C.text,
+
+        Font = Enum.Font.GothamMedium,
+        TextSize = 11,
+
+        TextWrapped = true,
+        ZIndex = 102
+    }, toast)
+
+    animate(toast, {
+        Position = UDim2.new(0.5, 0, 0, 15)
+    }, 0.22)
+
+    task.delay(2.3, function()
+        if toast.Parent then
+            animate(toast, {
+                Position = UDim2.new(0.5, 0, 0, -55)
+            }, 0.18)
+
+            task.delay(0.22, function()
+                if toast.Parent then
+                    toast:Destroy()
+                end
+            end)
+        end
+    end)
+end
+
+--==================================================
+-- LIVE THEME PROPAGATION
+--==================================================
+
+local function copyTheme(source)
+    local result = {}
+    for key, value in pairs(source) do
+        result[key] = value
+    end
+    return result
+end
+
+local function applyThemeToGui(previous)
+    local roles = {
+        bg = "bg",
+        panel = "panel",
+        side = "side",
+        card = "card",
+        blue = "blue",
+        light = "light",
+        text = "text",
+        muted = "muted",
+        green = "green",
+        active = "active"
+    }
+
+    local function recolor(value)
+        for role, oldRole in pairs(roles) do
+            if previous[oldRole] and value == previous[oldRole] then
+                return C[role]
+            end
+        end
+        return value
+    end
+
+    for _, object in ipairs(gui:GetDescendants()) do
+        if object:IsA("GuiObject") then
+            pcall(function() object.BackgroundColor3 = recolor(object.BackgroundColor3) end)
+            pcall(function() object.TextColor3 = recolor(object.TextColor3) end)
+            pcall(function() object.TextStrokeColor3 = recolor(object.TextStrokeColor3) end)
+            pcall(function() object.PlaceholderColor3 = recolor(object.PlaceholderColor3) end)
+            pcall(function() object.ImageColor3 = recolor(object.ImageColor3) end)
+            pcall(function() object.ScrollBarImageColor3 = recolor(object.ScrollBarImageColor3) end)
+        elseif object:IsA("UIStroke") then
+            object.Color = recolor(object.Color)
+        end
+    end
+
+    -- These three borders are animated, so reset them explicitly before the next pulse.
+    main.BackgroundColor3 = C.bg
+    sidebar.BackgroundColor3 = C.side
+    logo.BackgroundColor3 = C.panel
+    floatingCircle.BackgroundColor3 = C.panel
+    mainStroke.Color = C.blue
+    logoStroke.Color = C.blue
+    floatingStroke.Color = C.blue
+
+    if simpleToggleButton then
+        simpleToggleButton.TextColor3 = C.light
+    end
+end
+
+local function refreshTheme()
+    local previous = copyTheme(C)
+    buildTheme()
+    applyThemeToGui(previous)
+end
+
+--==================================================
+-- RESPONSIVE LAYOUT
+--==================================================
+
+local function resizePanel()
+    local camera = workspace.CurrentCamera
+    if not camera then return end
+
+    local viewport = camera.ViewportSize
+
+    local width
+    local height
+
+    if state.simple then
+        width = math.min(viewport.X - 16, 360)
+        height = 132
+    elseif state.maximized then
+        width = math.min(viewport.X - 16, 1100)
+        height = math.min(viewport.Y - 20, 900)
+    elseif viewport.X < 600 then
+        width = math.max(300, viewport.X - 20)
+        height = math.max(340, math.min(viewport.Y * 0.72, 650))
+    else
+        width = math.min(600, viewport.X - 50)
+        height = math.min(480, viewport.Y - 50)
+    end
+
+    width = math.min(width, viewport.X - 12)
+    height = math.min(height, viewport.Y - 12)
+
+    main.Size = UDim2.fromOffset(width, height)
+    main.Position = UDim2.fromScale(0.5, 0.5)
+
+    uiScale.Scale = math.clamp(settings.uiScale, 0.85, 1.12)
+
+    local sideWidth = viewport.X < 600 and 96 or 125
+
+    sidebar.Position = UDim2.fromOffset(11, 79)
+    sidebar.Size = UDim2.new(0, sideWidth, 1, -119)
+
+    searchFrame.Position = UDim2.fromOffset(sideWidth + 20, 79)
+    searchFrame.Size = UDim2.new(1, -(sideWidth + 31), 0, 32)
+
+    content.Position = UDim2.fromOffset(sideWidth + 20, 119)
+    content.Size = UDim2.new(1, -(sideWidth + 31), 1, -159)
+
+    dragHandle.Size = UDim2.new(1, -206, 1, 0)
+
+    if viewport.X < 420 or state.simple then
+        title.Text = "N45d"
+        subtitle.Visible = false
+    else
+        title.Text = "N45d Panel"
+        subtitle.Visible = true
+    end
+
+    local fullVisible = not state.simple
+    sidebar.Visible = fullVisible
+    searchFrame.Visible = fullVisible
+    content.Visible = fullVisible
+    dividerBottom.Visible = fullVisible
+    footer.Visible = fullVisible
+    if resizeGrip then resizeGrip.Visible = fullVisible end
+
+    if simpleBar then
+        simpleBar.Visible = state.simple
+        simpleBar.Size = UDim2.new(1, -20, 0, 45)
+        if layoutSimpleBar then layoutSimpleBar() end
+    end
+    if quickActions then
+        quickActions.Visible = UIS.TouchEnabled and state.minimized
+        for _, quickButtonObject in ipairs(quickActions:GetChildren()) do
+            if quickButtonObject:IsA("TextButton") then
+                local active = (quickButtonObject.Name == "QuickSPR" and state.sprinting)
+                    or (quickButtonObject.Name == "QuickSPEC" and state.spectating)
+                if quickButtonObject.Name == "QuickSPR" or quickButtonObject.Name == "QuickSPEC" then
+                    quickButtonObject.TextColor3 = active and C.green or C.light
+                    local stroke = quickButtonObject:FindFirstChildOfClass("UIStroke")
+                    if stroke then stroke.Color = active and C.green or C.blue end
+                end
+            end
+        end
+    end
+    if simpleToggleButton then
+        simpleToggleButton.Text = state.simple and "⌄" or "^"
+    end
+end
+
+local function watchCamera()
+    if viewportConnection then
+        viewportConnection:Disconnect()
+        viewportConnection = nil
+    end
+
+    local camera = workspace.CurrentCamera
+
+    if camera then
+        viewportConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(resizePanel)
+    end
+
+    resizePanel()
+
+    if camera and state.remoteHide and remoteHideData and remoteCameraAnchor and remoteCameraAnchor.Parent then
+        -- Keep Roblox's standard camera controller active and following the local camera anchor.
+        camera.CameraType = Enum.CameraType.Custom
+        camera.CameraSubject = remoteCameraAnchor
+    elseif camera and state.spectating and selectedPlayer then
+        local h = selectedPlayer.Character
+            and selectedPlayer.Character:FindFirstChildOfClass("Humanoid")
+
+        if h then
+            camera.CameraSubject = h
+        end
+    end
+end
+
+connect(workspace:GetPropertyChangedSignal("CurrentCamera"), watchCamera)
+
+state.simple = settings.simpleUI == true
+watchCamera()
+
+--==================================================
+-- PANEL CONTROLS
+--==================================================
+
+local function minimize()
+    if state.closed then return end
+
+    state.minimized = true
+    main.Visible = false
+    floating.Visible = true
+    if quickActions then quickActions.Visible = UIS.TouchEnabled end
+
+    notify("Panel minimized.")
+end
+
+local function restore()
+    if state.closed then return end
+
+    state.minimized = false
+    floating.Visible = false
+    main.Visible = true
+
+    resizePanel()
+end
+
+local function maximize(value)
+    state.maximized = value
+    if value then
+        state.simple = false
+        settings.simpleUI = false
+        saveSettings()
+    end
+    resizePanel()
+end
+
+local function setSimpleMode(value)
+    state.simple = value == true
+    settings.simpleUI = state.simple
+    if state.simple then
+        state.maximized = false
+    end
+    saveSettings()
+    resizePanel()
+end
+
+simpleToggleButton = headerButton("^", -144, function()
+    setSimpleMode(not state.simple)
+end)
+
+headerButton("−", -108, minimize)
+
+headerButton("□", -72, function()
+    maximize(not state.maximized)
+end)
+
+headerButton("×", -36, function()
+    gui:Destroy()
+end)
+
+--==================================================
+-- DRAGGING
+--==================================================
+
+local function makeDraggable(handle, target, onTap)
+    local activeInput
+    local startPoint
+    local startPosition
+    local moved = false
+
+    connect(handle.InputBegan, function(input)
+        local mouse = input.UserInputType == Enum.UserInputType.MouseButton1
+        local touch = input.UserInputType == Enum.UserInputType.Touch
+
+        if not mouse and not touch then return end
+
+        activeInput = input
+        startPoint = Vector2.new(input.Position.X, input.Position.Y)
+        startPosition = target.Position
+        moved = false
+        target:SetAttribute("N45dDragMoved", false)
+    end)
+
+    connect(UIS.InputChanged, function(input)
+        if not activeInput then return end
+
+        local valid
+
+        if activeInput.UserInputType == Enum.UserInputType.Touch then
+            valid = input == activeInput
+        else
+            valid = input.UserInputType == Enum.UserInputType.MouseMovement
+        end
+
+        if not valid then return end
+
+        local point = Vector2.new(input.Position.X, input.Position.Y)
+        local delta = point - startPoint
+
+        if delta.Magnitude > 6 then
+            moved = true
+            target:SetAttribute("N45dDragMoved", true)
+        end
+
+        if moved then
+            target.Position = UDim2.new(
+                startPosition.X.Scale,
+                startPosition.X.Offset + delta.X,
+                startPosition.Y.Scale,
+                startPosition.Y.Offset + delta.Y
+            )
+        end
+    end)
+
+    connect(UIS.InputEnded, function(input)
+        if not activeInput then return end
+
+        local ended = input == activeInput
+
+        if activeInput.UserInputType == Enum.UserInputType.MouseButton1 then
+            ended = input.UserInputType == Enum.UserInputType.MouseButton1
+        end
+
+        if not ended then return end
+
+        activeInput = nil
+
+        if moved then
+            task.delay(0.2, function()
+                if target.Parent then
+                    target:SetAttribute("N45dDragMoved", false)
+                end
+            end)
+        elseif onTap then
+            onTap()
+        end
+    end)
+end
+
+makeDraggable(dragHandle, main)
+makeDraggable(floating, floating, restore)
+
+--==================================================
+-- RESIZE HANDLE
+--==================================================
+
+resizeGrip = create("TextButton", {
+    Position = UDim2.new(1, -23, 1, -23),
+    Size = UDim2.fromOffset(21, 21),
+
+    BackgroundColor3 = C.card,
+    BackgroundTransparency = 0.2,
+
+    Text = "◢",
+    TextColor3 = C.light,
+
+    Font = Enum.Font.GothamBold,
+    TextSize = 13,
+
+    AutoButtonColor = false,
+    Active = true
+}, main)
+
+local resizeActive
+local resizeStart
+local resizeSize
+
+resizeGrip.InputBegan:Connect(function(input)
+    if state.maximized then return end
+
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+
+        resizeActive = input
+        resizeStart = Vector2.new(input.Position.X, input.Position.Y)
+        resizeSize = main.AbsoluteSize
+    end
+end)
+
+connect(UIS.InputChanged, function(input)
+    if not resizeActive then return end
+
+    local valid = input == resizeActive
+
+    if resizeActive.UserInputType == Enum.UserInputType.MouseButton1 then
+        valid = input.UserInputType == Enum.UserInputType.MouseMovement
+    end
+
+    if not valid then return end
+
+    local point = Vector2.new(input.Position.X, input.Position.Y)
+    local delta = point - resizeStart
+
+    local camera = workspace.CurrentCamera
+    local viewport = camera and camera.ViewportSize or Vector2.new(800, 600)
+
+    local minWidth = math.min(300, viewport.X - 12)
+    local minHeight = math.min(340, viewport.Y - 12)
+
+    local width = math.clamp(resizeSize.X + delta.X, minWidth, viewport.X - 12)
+    local height = math.clamp(resizeSize.Y + delta.Y, minHeight, viewport.Y - 12)
+
+    main.Size = UDim2.fromOffset(width, height)
+end)
+
+connect(UIS.InputEnded, function(input)
+    if resizeActive and input == resizeActive then
+        resizeActive = nil
+    elseif resizeActive
+        and resizeActive.UserInputType == Enum.UserInputType.MouseButton1
+        and input.UserInputType == Enum.UserInputType.MouseButton1 then
+
+        resizeActive = nil
+    end
+end)
+
+--==================================================
+-- CONTENT HELPERS
+--==================================================
+
+local function clearContent()
+    activePlayerRefresh = nil
+
+    for _, object in ipairs(content:GetChildren()) do
+        if object ~= contentLayout and object ~= contentPadding then
+            object:Destroy()
+        end
+    end
+
+    content.CanvasPosition = Vector2.zero
+end
+
+local function section(text)
+    local label = makeLabel(content, string.upper(text), 24, 11)
+    label.TextColor3 = C.light
+    return label
+end
+
+local function actionButton(parent, text, callback, size)
+    local button = create("TextButton", {
+        Size = size or UDim2.new(1, -4, 0, 36),
+
+        BackgroundColor3 = C.card,
+
+        Text = text,
+        TextColor3 = C.text,
+
+        Font = fonts[settings.font],
+        TextSize = settings.textSize,
+
+        AutoButtonColor = false,
+        Active = true,
+        Selectable = true,
+
+        TextWrapped = true
+    }, parent)
+
+    corner(button, settings.radius)
+    outline(button, C.blue, 1)
+    trackText(button, settings.textSize)
+
+    local scale = create("UIScale", {
+        Scale = 1
+    }, button)
+
+    button.Activated:Connect(function()
+        -- A draggable Simple UI control must not also fire its action on release.
+        if button:GetAttribute("N45dDragMoved") then
+            button:SetAttribute("N45dDragMoved", false)
+            return
+        end
+
+        if settings.buttonAnimation and not settings.reduceMotion then
+            animate(scale, {Scale = 0.97}, 0.06)
+
+            task.delay(0.07, function()
+                if scale.Parent then
+                    animate(scale, {Scale = 1}, 0.12)
+                end
+            end)
+        end
+
+        local ok, err = pcall(callback)
+
+        if not ok then
+            notify("Action failed: " .. tostring(err), "error")
+        end
+    end)
+
+    return button
+end
+
+local function createSimpleBar()
+    simpleBar = create("Frame", {
+        Name = "SimpleControls",
+        Position = UDim2.fromOffset(10, 77),
+        Size = UDim2.new(1, -20, 0, 45),
+        BackgroundTransparency = 1,
+        Visible = false
+    }, main)
+
+    local items = {
+        {"DASH", dashCharacter},
+        {"SPRINT", function()
+            state.sprinting = not state.sprinting
+            applyMovement()
+            notify("Sprint: " .. (state.sprinting and "ON" or "OFF"), "success")
+        end},
+        {"SPEC", openSpectatePicker},
+        {"RESET", resetCharacter},
+        {"REMOTE HIDE", function()
+            setRemoteHide(not state.remoteHide)
+        end}
+    }
+
+    local simpleButtons = {}
+    local widths = {1, 1, 1, 1, 1.22}
+    layoutSimpleBar = function()
+        if not simpleBar then return end
+        local available = math.max(simpleBar.AbsoluteSize.X, 260)
+        local gap = 4
+        local unit = math.max(42, (available - gap * (#items - 1)) / 5.22)
+        local x = 0
+        for index, item in ipairs(items) do
+            local b = simpleButtons[index]
+            if b then
+                local width = unit * widths[index]
+                b.Size = UDim2.fromOffset(width, 36)
+                b.Position = UDim2.fromOffset(x, 4)
+                x += width + gap
+            end
+        end
+    end
+
+    for index, item in ipairs(items) do
+        local b = actionButton(simpleBar, item[1], item[2], UDim2.fromOffset(56, 36))
+        b.Name = "Simple" .. item[1]:gsub("%s+", "")
+        b.Position = UDim2.new(0, (index - 1) * 60, 0, 4)
+        b.TextSize = 8
+        trackText(b, 8)
+        if index == 5 then
+            simpleRemoteButton = b
+        end
+        simpleButtons[index] = b
+        makeDraggable(b, b)
+    end
+
+    task.defer(function()
+        if layoutSimpleBar then layoutSimpleBar() end
+    end)
+end
+
+local function button(text, callback)
+    return actionButton(content, text, callback)
+end
+
+local function actionGrid(items)
+    local holder = create("Frame", {
+        Size = UDim2.new(1, -4, 0, 0),
+
+        BackgroundTransparency = 1,
+        AutomaticSize = Enum.AutomaticSize.Y
+    }, content)
+
+    local grid = create("UIGridLayout", {
+        CellSize = UDim2.new(0.5, -4, 0, 36),
+        CellPadding = UDim2.fromOffset(8, 7),
+
+        FillDirectionMaxCells = 2,
+        SortOrder = Enum.SortOrder.LayoutOrder
+    }, holder)
+
+    for _, item in ipairs(items) do
+        local b = actionButton(holder, item[1], item[2], UDim2.new(0.5, -4, 0, 36))
+        b.LayoutOrder = #holder:GetChildren()
+    end
+
+    return holder
+end
+
+local function infoCard(titleText, value)
+    local frame = create("Frame", {
+        Size = UDim2.new(1, -4, 0, 51),
+        BackgroundColor3 = C.card,
+        BorderSizePixel = 0
+    }, content)
+
+    corner(frame, 9)
+
+    local titleLabel = makeLabel(frame, titleText, 15, 9)
+    titleLabel.Position = UDim2.fromOffset(9, 3)
+    titleLabel.TextColor3 = C.muted
+
+    local valueLabel = makeLabel(frame, tostring(value), 25, 13)
+    valueLabel.Position = UDim2.fromOffset(9, 19)
+    valueLabel.Size = UDim2.new(1, -18, 0, 25)
+    valueLabel.Font = Enum.Font.GothamBold
+
+    return valueLabel
+end
+
+local function textEntry(titleText, initial, placeholder, callback)
+    makeLabel(content, titleText, 19, 11)
+
+    local box = create("TextBox", {
+        Size = UDim2.new(1, -4, 0, 38),
+
+        BackgroundColor3 = C.card,
+
+        Text = initial or "",
+        PlaceholderText = placeholder or "Type here...",
+        PlaceholderColor3 = C.muted,
+
+        TextColor3 = C.text,
+        ClearTextOnFocus = false,
+
+        Font = fonts[settings.font],
+        TextSize = settings.textSize,
+
+        TextXAlignment = Enum.TextXAlignment.Left
+    }, content)
+
+    corner(box, 9)
+    outline(box, C.blue, 1)
+
+    trackText(box, settings.textSize)
+
+    create("UIPadding", {
+        PaddingLeft = UDim.new(0, 10),
+        PaddingRight = UDim.new(0, 8)
+    }, box)
+
+    box.FocusLost:Connect(function(enterPressed)
+        if callback then
+            callback(box.Text, enterPressed)
+        end
+    end)
+
+    return box
+end
+
+--==================================================
+-- TOGGLE COMPONENT
+--==================================================
+
+local function toggle(titleText, initial, callback)
+    local enabled = initial == true
+
+    local row = create("Frame", {
+        Size = UDim2.new(1, -4, 0, 42),
+        BackgroundColor3 = C.card,
+        BorderSizePixel = 0
+    }, content)
+
+    corner(row, settings.radius)
+
+    local label = makeLabel(row, titleText, 36, 11)
+    label.Position = UDim2.fromOffset(9, 3)
+    label.Size = UDim2.new(1, -110, 0, 36)
+
+    local stateLabel = create("TextLabel", {
+        Position = UDim2.new(1, -94, 0, 0),
+        Size = UDim2.fromOffset(34, 42),
+
+        BackgroundTransparency = 1,
+
+        Text = enabled and "ON" or "OFF",
+        TextColor3 = enabled and C.green or C.muted,
+
+        Font = Enum.Font.GothamBold,
+        TextSize = 9
+    }, row)
+
+    local track = create("TextButton", {
+        Position = UDim2.new(1, -54, 0.5, -12),
+        Size = UDim2.fromOffset(46, 24),
+
+        BackgroundColor3 = enabled and C.active or C.side,
+
+        Text = "",
+        AutoButtonColor = false
+    }, row)
+
+    corner(track, 20)
+
+    local edge = outline(track, enabled and C.green or C.blue, 1)
+
+    local knob = create("Frame", {
+        Position = enabled
+            and UDim2.new(1, -21, 0.5, -9)
+            or UDim2.new(0, 3, 0.5, -9),
+
+        Size = UDim2.fromOffset(18, 18),
+
+        BackgroundColor3 = enabled and C.green or C.muted,
+        BorderSizePixel = 0
+    }, track)
+
+    corner(knob, 20)
+
+    local function update()
+        stateLabel.Text = enabled and "ON" or "OFF"
+        stateLabel.TextColor3 = enabled and C.green or C.muted
+
+        animate(track, {
+            BackgroundColor3 = enabled and C.active or C.side
+        }, 0.14)
+
+        animate(knob, {
+            Position = enabled
+                and UDim2.new(1, -21, 0.5, -9)
+                or UDim2.new(0, 3, 0.5, -9),
+
+            BackgroundColor3 = enabled and C.green or C.muted
+        }, 0.14)
+
+        edge.Color = enabled and C.green or C.blue
+    end
+
+    track.Activated:Connect(function()
+        enabled = not enabled
+        update()
+        callback(enabled)
+    end)
+
+    update()
+
+    return row
+end
+
+--==================================================
+-- SLIDER COMPONENT
+--==================================================
+
+local function formatNumber(value, decimals)
+    decimals = decimals or 0
+
+    if decimals <= 0 then
+        return tostring(math.floor(value + 0.5))
+    end
+
+    return string.format("%." .. decimals .. "f", value)
+end
+
+local function slider(titleText, initial, minValue, maxValue, step, callback, decimals)
+    local holder = create("Frame", {
+        Size = UDim2.new(1, -4, 0, 62),
+        BackgroundColor3 = C.card,
+        BorderSizePixel = 0
+    }, content)
+
+    corner(holder, 9)
+
+    local titleLabel = makeLabel(holder, titleText, 20, 10)
+    titleLabel.Position = UDim2.fromOffset(9, 3)
+    titleLabel.Size = UDim2.new(1, -85, 0, 20)
+
+    local valueBox = create("TextBox", {
+        Position = UDim2.new(1, -71, 0, 3),
+        Size = UDim2.fromOffset(61, 21),
+
+        BackgroundColor3 = C.side,
+
+        Text = formatNumber(initial, decimals),
+        TextColor3 = C.light,
+
+        Font = Enum.Font.GothamBold,
+        TextSize = 10,
+
+        ClearTextOnFocus = false
+    }, holder)
+
+    corner(valueBox, 6)
+    trackText(valueBox, 10)
+
+    local track = create("Frame", {
+        Position = UDim2.new(0, 10, 0, 39),
+        Size = UDim2.new(1, -20, 0, 7),
+
+        BackgroundColor3 = C.side,
+        BorderSizePixel = 0,
+
+        Active = true
+    }, holder)
+
+    corner(track, 8)
+
+    local fill = create("Frame", {
+        Size = UDim2.new(0, 0, 1, 0),
+        BackgroundColor3 = C.blue,
+        BorderSizePixel = 0
+    }, track)
+
+    corner(fill, 8)
+
+    local knob = create("Frame", {
+        Size = UDim2.fromOffset(15, 15),
+        Position = UDim2.new(0, -7, 0.5, -7),
+
+        BackgroundColor3 = C.light,
+        BorderSizePixel = 0
+    }, track)
+
+    corner(knob, 20)
+    outline(knob, C.blue, 1)
+
+    local value = math.clamp(initial, minValue, maxValue)
+
+    local function quantize(number)
+        local steps = math.floor((number - minValue) / step + 0.5)
+        local result = minValue + steps * step
+
+        return math.clamp(result, minValue, maxValue)
+    end
+
+    local function update(newValue, finished)
+        value = quantize(newValue)
+
+        local alpha = (value - minValue) / (maxValue - minValue)
+
+        fill.Size = UDim2.new(alpha, 0, 1, 0)
+        knob.Position = UDim2.new(alpha, -7, 0.5, -7)
+
+        valueBox.Text = formatNumber(value, decimals)
+
+        callback(value, finished == true)
+    end
+
+    local function updateFromX(x, finished)
+        local start = track.AbsolutePosition.X
+        local width = math.max(track.AbsoluteSize.X, 1)
+
+        local alpha = math.clamp((x - start) / width, 0, 1)
+        update(minValue + (maxValue - minValue) * alpha, finished)
+    end
+
+    local activeInput
+    local moveConnection
+    local endConnection
+
+    local function stopDrag()
+        if moveConnection then
+            moveConnection:Disconnect()
+            moveConnection = nil
+        end
+
+        if endConnection then
+            endConnection:Disconnect()
+            endConnection = nil
+        end
+
+        activeInput = nil
+        callback(value, true)
+    end
+
+    track.InputBegan:Connect(function(input)
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1
+            and input.UserInputType ~= Enum.UserInputType.Touch then
+            return
+        end
+
+        activeInput = input
+        updateFromX(input.Position.X, false)
+
+        moveConnection = UIS.InputChanged:Connect(function(changed)
+            local valid
+
+            if activeInput.UserInputType == Enum.UserInputType.Touch then
+                valid = changed == activeInput
+            else
+                valid = changed.UserInputType == Enum.UserInputType.MouseMovement
+            end
+
+            if valid then
+                updateFromX(changed.Position.X, false)
+            end
+        end)
+
+        endConnection = UIS.InputEnded:Connect(function(ended)
+            local valid = ended == activeInput
+
+            if activeInput and activeInput.UserInputType == Enum.UserInputType.MouseButton1 then
+                valid = ended.UserInputType == Enum.UserInputType.MouseButton1
+            end
+
+            if valid then
+                stopDrag()
+            end
+        end)
+    end)
+
+    valueBox.FocusLost:Connect(function()
+        local number = tonumber(valueBox.Text)
+
+        if number then
+            update(number, true)
+        else
+            update(value, true)
+        end
+    end)
+
+    update(value, false)
+
+    return holder
+end
+
+--==================================================
+-- CHOICE / DROPDOWN COMPONENT
+--==================================================
+
+local function choice(titleText, initial, options, callback)
+    local wrapper = create("Frame", {
+        Size = UDim2.new(1, -4, 0, 59),
+
+        BackgroundTransparency = 1,
+        AutomaticSize = Enum.AutomaticSize.Y
+    }, content)
+
+    local label = makeLabel(wrapper, titleText, 18, 10)
+    label.Position = UDim2.fromOffset(0, 0)
+
+    local selected = initial
+
+    local selectedButton = create("TextButton", {
+        Position = UDim2.fromOffset(0, 21),
+        Size = UDim2.new(1, 0, 0, 34),
+
+        BackgroundColor3 = C.card,
+
+        Text = tostring(selected) .. "     ▾",
+        TextColor3 = C.text,
+
+        Font = fonts[settings.font],
+        TextSize = 11,
+
+        AutoButtonColor = false
+    }, wrapper)
+
+    corner(selectedButton, 8)
+    outline(selectedButton, C.blue, 1)
+    trackText(selectedButton, 11)
+
+    local optionsHolder = create("Frame", {
+        Position = UDim2.fromOffset(0, 60),
+        Size = UDim2.new(1, 0, 0, 0),
+
+        BackgroundColor3 = C.side,
+        Visible = false,
+
+        AutomaticSize = Enum.AutomaticSize.Y
+    }, wrapper)
+
+    corner(optionsHolder, 8)
+
+    local list = create("UIListLayout", {
+        Padding = UDim.new(0, 4)
+    }, optionsHolder)
+
+    local padding = create("UIPadding", {
+        PaddingTop = UDim.new(0, 5),
+        PaddingBottom = UDim.new(0, 5),
+        PaddingLeft = UDim.new(0, 5),
+        PaddingRight = UDim.new(0, 5)
+    }, optionsHolder)
+
+    local function updateButton()
+        selectedButton.Text = tostring(selected) .. "     ▾"
+    end
+
+    local function updateOptions()
+        for _, child in ipairs(optionsHolder:GetChildren()) do
+            if child:IsA("TextButton") then
+                child:Destroy()
+            end
+        end
+
+        for _, option in ipairs(options) do
+            local b = create("TextButton", {
+                Size = UDim2.new(1, 0, 0, 30),
+
+                BackgroundColor3 = option == selected and C.active or C.card,
+
+                Text = tostring(option),
+                TextColor3 = option == selected and C.green or C.text,
+
+                Font = fonts[settings.font],
+                TextSize = 10,
+
+                AutoButtonColor = false
+            }, optionsHolder)
+
+            corner(b, 6)
+            trackText(b, 10)
+
+            b.Activated:Connect(function()
+                selected = option
+                updateButton()
+                optionsHolder.Visible = false
+                callback(option)
+            end)
+        end
+    end
+
+    selectedButton.Activated:Connect(function()
+        optionsHolder.Visible = not optionsHolder.Visible
+
+        if optionsHolder.Visible then
+            updateOptions()
+        end
+    end)
+
+    return wrapper
+end
+
+--==================================================
+-- PLAYER LIST COMPONENT
+--==================================================
+
+local function findPlayer(name)
+    if not name or name == "" then return nil end
+
+    name = string.lower(name)
+
+    for _, target in ipairs(Players:GetPlayers()) do
+        if target ~= player then
+            if string.lower(target.Name) == name
+                or string.lower(target.DisplayName) == name then
+
+                return target
+            end
+        end
+    end
+
+    for _, target in ipairs(Players:GetPlayers()) do
+        if target ~= player
+            and string.lower(target.Name):sub(1, #name) == name then
+
+            return target
+        end
+    end
+
+    return nil
+end
+
+local function playerList()
+    makeLabel(content, "SELECT A PLAYER", 20, 11)
+
+    local search = textEntry(
+        "PLAYER SEARCH",
+        "",
+        "Username or display name"
+    )
+
+    local holder = create("ScrollingFrame", {
+        Size = UDim2.new(1, -4, 0, 145),
+
+        BackgroundColor3 = C.side,
+        BorderSizePixel = 0,
+
+        ScrollBarThickness = 3,
+        ScrollBarImageColor3 = C.blue,
+
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        CanvasSize = UDim2.new(),
+
+        Active = true
+    }, content)
+
+    corner(holder, 9)
+
+    local layout = create("UIListLayout", {
+        Padding = UDim.new(0, 4),
+        SortOrder = Enum.SortOrder.LayoutOrder
+    }, holder)
+
+    local padding = create("UIPadding", {
+        PaddingTop = UDim.new(0, 4),
+        PaddingBottom = UDim.new(0, 4),
+        PaddingLeft = UDim.new(0, 4),
+        PaddingRight = UDim.new(0, 4)
+    }, holder)
+
+    local function refresh()
+        for _, child in ipairs(holder:GetChildren()) do
+            if child:IsA("TextButton") then
+                child:Destroy()
+            end
+        end
+
+        local query = string.lower(search.Text)
+
+        local found = 0
+
+        for _, target in ipairs(Players:GetPlayers()) do
+            if target ~= player then
+                local fullName = string.lower(target.Name .. " " .. target.DisplayName)
+
+                if query == "" or fullName:find(query, 1, true) then
+                    found += 1
+
+                    local selected = selectedPlayer == target
+
+                    local b = create("TextButton", {
+                        Size = UDim2.new(1, 0, 0, 34),
+
+                        BackgroundColor3 = selected and C.active or C.card,
+
+                        Text = target.DisplayName .. "  @" .. target.Name,
+                        TextColor3 = selected and C.green or C.text,
+
+                        Font = fonts[settings.font],
+                        TextSize = 10,
+
+                        AutoButtonColor = false,
+                        TextXAlignment = Enum.TextXAlignment.Left
+                    }, holder)
+
+                    corner(b, 7)
+                    trackText(b, 10)
+
+                    local pad = create("UIPadding", {
+                        PaddingLeft = UDim.new(0, 8)
+                    }, b)
+
+                    b.Activated:Connect(function()
+                        selectedPlayer = target
+                        refresh()
+                        notify("Selected " .. target.Name, "success")
+                    end)
+                end
+            end
+        end
+
+        if found == 0 then
+            local empty = makeLabel(holder, "No players found.", 30, 10)
+            empty.TextXAlignment = Enum.TextXAlignment.Center
+            empty.TextColor3 = C.muted
+        end
+    end
+
+    search:GetPropertyChangedSignal("Text"):Connect(refresh)
+
+    activePlayerRefresh = refresh
+    refresh()
+end
+
+--==================================================
+-- CHAT HELPERS
+--==================================================
+
+local function getGeneralChannel()
+    local channels = TextChatService:FindFirstChild("TextChannels")
+    if not channels then return nil end
+
+    local general = channels:FindFirstChild("RBXGeneral")
+
+    if general and general:IsA("TextChannel") then
+        return general
+    end
+
+    for _, channel in ipairs(channels:GetChildren()) do
+        if channel:IsA("TextChannel") then
+            return channel
+        end
+    end
+
+    return nil
+end
+
+local function sendChat(text)
+    if type(text) ~= "string" or text:match("^%s*$") then
+        return false, "Enter a message first."
+    end
+
+    local channel = getGeneralChannel()
+
+    if not channel then
+        return false, "No available text channel."
+    end
+
+    local ok, err = pcall(function()
+        channel:SendAsync(text)
+    end)
+
+    if not ok then
+        return false, tostring(err)
+    end
+
+    return true, "Message submitted."
+end
+
+--==================================================
+-- COMMAND SYSTEM
+--==================================================
+
+local commandLibrary = {
+    {
+        name = "speed",
+        usage = "speed 32",
+        description = "Set local walk speed."
+    },
+    {
+        name = "jump",
+        usage = "jump 80",
+        description = "Set local jump power."
+    },
+    {
+        name = "fly",
+        usage = "fly on / fly off",
+        description = "Toggle local flight."
+    },
+    {
+        name = "noclip",
+        usage = "noclip on / noclip off",
+        description = "Toggle local noclip."
+    },
+    {
+        name = "infjump",
+        usage = "infjump on / infjump off",
+        description = "Toggle infinite jump."
+    },
+    {
+        name = "sprint",
+        usage = "sprint on / sprint off",
+        description = "Toggle sprint."
+    },
+    {
+        name = "fov",
+        usage = "fov 90",
+        description = "Change camera field of view."
+    },
+    {
+        name = "spectate",
+        usage = "spectate username",
+        description = "Spectate a selected player."
+    },
+    {
+        name = "unspectate",
+        usage = "unspectate",
+        description = "Restore your camera."
+    },
+    {
+        name = "reset",
+        usage = "reset",
+        description = "Reset movement settings."
+    }
+}
+
+local function runCommand(raw)
+    local args = {}
+
+    for value in string.gmatch(raw, "%S+") do
+        table.insert(args, value)
+    end
+
+    local cmd = string.lower(args[1] or "")
+    local arg = args[2]
+    local number = tonumber(arg)
+
+    if cmd == "help" then
+        return true, "Commands: speed, jump, fly, noclip, infjump, sprint, fov, spectate, unspectate, reset."
+    end
+
+    if cmd == "speed" and number then
+        settings.speed = math.clamp(number, 0, 150)
+        applyMovement()
+        saveSettings()
+        return true, "Walk speed updated."
+
+    elseif cmd == "jump" and number then
+        settings.jump = math.clamp(number, 0, 200)
+        applyMovement()
+        saveSettings()
+        return true, "Jump power updated."
+
+    elseif cmd == "fly" then
+        local value = arg == "on" and true or arg == "off" and false or not state.flying
+        state.flying = value
+        flyVertical = 0
+        return true, "Fly: " .. tostring(value)
+
+    elseif cmd == "noclip" then
+        local value = arg == "on" and true or arg == "off" and false or not state.noclip
+        setNoclip(value)
+        return true, "Noclip: " .. tostring(value)
+
+    elseif cmd == "infjump" then
+        local value = arg == "on" and true or arg == "off" and false or not state.infiniteJump
+        state.infiniteJump = value
+        return true, "Infinite jump: " .. tostring(value)
+
+    elseif cmd == "sprint" then
+        local value = arg == "on" and true or arg == "off" and false or not state.sprinting
+        state.sprinting = value
+        applyMovement()
+        return true, "Sprint: " .. tostring(value)
+
+    elseif cmd == "fov" and number then
+        settings.fov = math.clamp(number, 40, 110)
+
+        if workspace.CurrentCamera then
+            workspace.CurrentCamera.FieldOfView = settings.fov
+        end
+
+        saveSettings()
+        return true, "Camera FOV updated."
+
+    elseif cmd == "spectate" then
+        local target = findPlayer(arg)
+
+        if not target then
+            return false, "Player not found."
+        end
+
+        return spectate(target)
+
+    elseif cmd == "unspectate" then
+        stopSpectating()
+        return true, "Camera restored."
+
+    elseif cmd == "reset" then
+        settings.speed = defaults.speed
+        settings.jump = defaults.jump
+        settings.sprint = defaults.sprint
+        settings.flySpeed = defaults.flySpeed
+        settings.dashPower = defaults.dashPower
+
+        state.flying = false
+        state.sprinting = false
+        state.infiniteJump = false
+
+        setNoclip(false)
+        applyMovement()
+        saveSettings()
+
+        return true, "Movement settings reset."
+    end
+
+    return false, "Unknown command or invalid value. Type help."
+end
+
+--==================================================
+-- INSTANT SPECTATE PLAYER PICKER
+--==================================================
+
+local function closeSpectatePicker()
+    if spectatePicker then
+        spectatePicker:Destroy()
+        spectatePicker = nil
+    end
+end
+
+openSpectatePicker = function()
+    closeSpectatePicker()
+
+    local overlay = create("Frame", {
+        Name = "SpectatePicker",
+        Size = UDim2.fromScale(1, 1),
+        BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = 0.38,
+        ZIndex = 80
+    }, gui)
+    spectatePicker = overlay
+
+    local panel = create("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.fromScale(0.5, 0.5),
+        Size = UDim2.new(0.88, 0, 0, 300),
+        BackgroundColor3 = C.panel,
+        BorderSizePixel = 0,
+        ZIndex = 81
+    }, overlay)
+    corner(panel, 12)
+    outline(panel, C.blue, 2)
+
+    local heading = create("TextLabel", {
+        Position = UDim2.fromOffset(12, 8),
+        Size = UDim2.new(1, -58, 0, 30),
+        BackgroundTransparency = 1,
+        Text = "SPECTATE PLAYER  •  " .. tostring(#Players:GetPlayers() - 1),
+        TextColor3 = C.light,
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 82
+    }, panel)
+
+    local close = create("TextButton", {
+        Position = UDim2.new(1, -38, 0, 7),
+        Size = UDim2.fromOffset(29, 29),
+        BackgroundColor3 = C.card,
+        Text = "×",
+        TextColor3 = C.text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 18,
+        ZIndex = 82
+    }, panel)
+    corner(close, 7)
+    close.Activated:Connect(closeSpectatePicker)
+
+    local list = create("ScrollingFrame", {
+        Position = UDim2.fromOffset(9, 44),
+        Size = UDim2.new(1, -18, 1, -54),
+        BackgroundColor3 = C.side,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 3,
+        ScrollBarImageColor3 = C.blue,
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        CanvasSize = UDim2.new(),
+        ZIndex = 82
+    }, panel)
+    corner(list, 8)
+    create("UIListLayout", {Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder}, list)
+    create("UIPadding", {PaddingTop = UDim.new(0, 5), PaddingBottom = UDim.new(0, 5), PaddingLeft = UDim.new(0, 5), PaddingRight = UDim.new(0, 5)}, list)
+
+    local found = 0
+    for _, target in ipairs(Players:GetPlayers()) do
+        if target ~= player then
+            found += 1
+            local row = create("TextButton", {
+                Size = UDim2.new(1, 0, 0, 48),
+                BackgroundColor3 = target == selectedPlayer and C.active or C.card,
+                Text = "",
+                AutoButtonColor = false,
+                ZIndex = 83
+            }, list)
+            corner(row, 8)
+
+            local avatar = create("ImageLabel", {
+                Position = UDim2.fromOffset(5, 5),
+                Size = UDim2.fromOffset(38, 38),
+                BackgroundColor3 = C.side,
+                Image = "",
+                ZIndex = 84
+            }, row)
+            corner(avatar, 20)
+
+            local display = create("TextLabel", {
+                Position = UDim2.fromOffset(51, 5),
+                Size = UDim2.new(1, -58, 0, 20),
+                BackgroundTransparency = 1,
+                Text = target.DisplayName,
+                TextColor3 = C.text,
+                Font = Enum.Font.GothamBold,
+                TextSize = 11,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                ZIndex = 84
+            }, row)
+            local username = create("TextLabel", {
+                Position = UDim2.fromOffset(51, 24),
+                Size = UDim2.new(1, -58, 0, 17),
+                BackgroundTransparency = 1,
+                Text = "@" .. target.Name,
+                TextColor3 = C.muted,
+                Font = Enum.Font.Gotham,
+                TextSize = 9,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                ZIndex = 84
+            }, row)
+
+            task.spawn(function()
+                local ok, image = pcall(function()
+                    return Players:GetUserThumbnailAsync(target.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size100x100)
+                end)
+                if ok and avatar.Parent then avatar.Image = image end
+            end)
+
+            row.Activated:Connect(function()
+                selectedPlayer = target
+                local ok, message = spectate(target)
+                closeSpectatePicker()
+                notify(message, ok and "success" or "error")
+            end)
+        end
+    end
+
+    if found == 0 then
+        local empty = create("TextLabel", {
+            Size = UDim2.new(1, -10, 0, 40),
+            BackgroundTransparency = 1,
+            Text = "No other players are in this server.",
+            TextColor3 = C.muted,
+            Font = Enum.Font.Gotham,
+            TextSize = 10,
+            ZIndex = 83
+        }, list)
+    end
+end
+
+--==================================================
+-- REUSABLE PLAYER ACTIONS
+--==================================================
+
+dashCharacter = function()
+    local r = root()
+    local h = humanoid()
+
+    if not r or not h then
+        notify("Character is not ready.", "error")
+        return
+    end
+
+    if not state.dashReady then return end
+    state.dashReady = false
+
+    local direction = h.MoveDirection
+    if direction.Magnitude < 0.05 then
+        direction = r.CFrame.LookVector
+    end
+
+    r.AssemblyLinearVelocity = Vector3.new(
+        direction.X * settings.dashPower,
+        r.AssemblyLinearVelocity.Y,
+        direction.Z * settings.dashPower
+    )
+
+    task.delay(0.85, function()
+        state.dashReady = true
+    end)
+end
+
+resetCharacter = function()
+    local h = humanoid()
+    if not h then
+        notify("Character is not ready.", "error")
+        return
+    end
+    h.Health = 0
+    notify("Character reset requested.")
+end
+
+toggleSelectedSpectate = function()
+    if state.spectating then
+        stopSpectating()
+        notify("Camera restored.", "success")
+        return
+    end
+
+    if not selectedPlayer then
+        notify("Select a player in the Player tab first.", "error")
+        return
+    end
+
+    local ok, message = spectate(selectedPlayer)
+    notify(message, ok and "success" or "error")
+end
+
+--========================================================
+-- REMOTE HIDE | ROBLOX CAMERA + VIRTUAL MOVEMENT ANCHOR
+--========================================================
+
+local function getRemotePlayerControls()
+    if remotePlayerControls then return remotePlayerControls end
+
+    local playerScripts = player:FindFirstChild("PlayerScripts")
+    local playerModuleScript = playerScripts and playerScripts:FindFirstChild("PlayerModule")
+    if not playerModuleScript then return nil end
+
+    local ok, playerModule = pcall(require, playerModuleScript)
+    if not ok or not playerModule then return nil end
+
+    local controlsOK, controls = pcall(function()
+        return playerModule:GetControls()
+    end)
+    if controlsOK and controls then
+        remotePlayerControls = controls
+    end
+
+    return remotePlayerControls
+end
+
+local function captureRemoteCharacter(c)
+    c = c or character()
+    local h = c and c:FindFirstChildOfClass("Humanoid")
+    local r = c and c:FindFirstChild("HumanoidRootPart")
+    if not c or not h or not r or not remoteHideData then return false end
+
+    if remoteHideData.character ~= c then
+        remoteHideData.character = c
+        remoteHideData.characterSnapshot = {
+            rootAnchored = r.Anchored,
+            walkSpeed = h.WalkSpeed,
+            jumpPower = h.JumpPower,
+            useJumpPower = h.UseJumpPower,
+            autoRotate = h.AutoRotate,
+            platformStand = h.PlatformStand
+        }
+    end
+    return true
+end
+
+local function applyRemoteHoldToCharacter(c)
+    c = c or character()
+    if not remoteHideData or not c then return false end
+
+    local r = c:FindFirstChild("HumanoidRootPart")
+    local h = c:FindFirstChildOfClass("Humanoid")
+    if not r or not h then return false end
+
+    captureRemoteCharacter(c)
+
+    -- ON sequence: move to the remote holding point, then freeze there.
+    r.CFrame = remoteHideData.holdCFrame
+    r.AssemblyLinearVelocity = Vector3.zero
+    r.AssemblyAngularVelocity = Vector3.zero
+    h.WalkSpeed = 0
+    h.JumpPower = 0
+    h.AutoRotate = false
+    h.PlatformStand = true
+    r.Anchored = true
+    pcall(function() h:ChangeState(Enum.HumanoidStateType.Physics) end)
+    return true
+end
+
+local function createRemoteCameraAnchor(position)
+    if remoteCameraAnchor then
+        remoteCameraAnchor:Destroy()
+        remoteCameraAnchor = nil
+    end
+
+    local anchor = Instance.new("Part")
+    anchor.Name = "N45dRemoteCameraAnchor"
+    anchor.Shape = Enum.PartType.Ball
+    anchor.Size = Vector3.new(0.25, 0.25, 0.25)
+    anchor.CFrame = CFrame.new(position)
+    anchor.Anchored = true
+    anchor.CanCollide = false
+    anchor.CanTouch = false
+    anchor.CanQuery = false
+    anchor.CastShadow = false
+    anchor.Transparency = 1
+    anchor.Locked = true
+    anchor.Parent = workspace
+
+    remoteCameraAnchor = anchor
+    return anchor
+end
+
+local function getRemoteReturnCFrame()
+    if not remoteHideData then return nil end
+
+    -- The anchor represents the virtual player's position. Camera rotation/zoom
+    -- never changes this point; only movement input moves the anchor.
+    local virtualPosition = remoteCameraAnchor and remoteCameraAnchor.Parent
+        and remoteCameraAnchor.Position
+        or remoteHideData.startCFrame.Position
+
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {character()}
+    params.IgnoreWater = false
+
+    local origin = virtualPosition + Vector3.new(0, 48, 0)
+    local ignored = {character()}
+    params.FilterDescendantsInstances = ignored
+    local destination
+
+    for _ = 1, 8 do
+        local result = workspace:Raycast(origin, Vector3.new(0, -1600, 0), params)
+        if not result then break end
+
+        local canStand = false
+        pcall(function() canStand = result.Instance.CanCollide end)
+        if canStand then
+            destination = result.Position + Vector3.new(0, 3.2, 0)
+            break
+        end
+
+        table.insert(ignored, result.Instance)
+        params.FilterDescendantsInstances = ignored
+        origin = result.Position - Vector3.new(0, 0.05, 0)
+    end
+
+    if not destination then
+        destination = virtualPosition + Vector3.new(0, 3, 0)
+    end
+
+    local camera = workspace.CurrentCamera
+    local look = camera and camera.CFrame.LookVector or remoteHideData.startCFrame.LookVector
+    local flatLook = Vector3.new(look.X, 0, look.Z)
+    if flatLook.Magnitude < 0.001 then
+        local savedLook = remoteHideData.startCFrame.LookVector
+        flatLook = Vector3.new(savedLook.X, 0, savedLook.Z)
+    end
+    if flatLook.Magnitude < 0.001 then
+        flatLook = Vector3.new(0, 0, -1)
+    end
+
+    return CFrame.lookAt(destination, destination + flatLook.Unit)
+end
+
+local function refreshRemoteHideUI()
+    if simpleRemoteButton then
+        simpleRemoteButton.Text = state.remoteHide and "HIDE: ON" or "REMOTE HIDE"
+        simpleRemoteButton.TextColor3 = state.remoteHide and C.green or C.text
+        local edge = simpleRemoteButton:FindFirstChildOfClass("UIStroke")
+        if edge then edge.Color = state.remoteHide and C.green or C.blue end
+    end
+    if quickRemoteButton then
+        quickRemoteButton.Text = state.remoteHide and "HIDE ON" or "HIDE"
+        quickRemoteButton.TextColor3 = state.remoteHide and C.green or C.light
+        local edge = quickRemoteButton:FindFirstChildOfClass("UIStroke")
+        if edge then edge.Color = state.remoteHide and C.green or C.blue end
+    end
+    if remoteControls then
+        remoteControls.Visible = state.remoteHide and UIS.TouchEnabled
+    end
+end
+
+setRemoteHide = function(enabled, silent)
+    enabled = enabled == true
+
+    if enabled == state.remoteHide then
+        return true
+    end
+
+    local camera = workspace.CurrentCamera
+    local c = character()
+    local h = humanoid()
+    local r = root()
+
+    if enabled then
+        if not camera or not c or not h or not r or h.Health <= 0 then
+            if not silent then notify("Character or camera is not ready.", "error") end
+            return false
+        end
+
+        if state.spectating then stopSpectating() end
+        if state.flying then state.flying = false; flyVertical = 0 end
+
+        remoteHideData = {
+            startCFrame = r.CFrame,
+            anchorOrigin = r.Position,
+            holdCFrame = r.CFrame + Vector3.new(12000, 6000, 12000),
+            cameraType = camera.CameraType,
+            cameraSubject = camera.CameraSubject,
+            cameraCFrame = camera.CFrame,
+            fieldOfView = camera.FieldOfView,
+            mouseBehavior = UIS.MouseBehavior,
+            character = nil,
+            originalCharacter = c,
+            characterSnapshot = nil
+        }
+
+        local anchor = createRemoteCameraAnchor(r.Position)
+
+        -- Move to the remote holding point before freezing the real character.
+        if not applyRemoteHoldToCharacter(c) then
+            if anchor and anchor.Parent then anchor:Destroy() end
+            remoteCameraAnchor = nil
+            remoteHideData = nil
+            if not silent then notify("Could not hold the current character.", "error") end
+            return false
+        end
+
+        state.remoteHide = true
+        getRemotePlayerControls()
+        camera.CameraType = Enum.CameraType.Custom
+        camera.CameraSubject = anchor
+        camera.CFrame = remoteHideData.cameraCFrame
+        refreshRemoteHideUI()
+        if not silent then
+            notify("Remote Hide active. Use the normal Roblox camera and movement controls.", "success")
+        end
+        return true
+    end
+
+    if not remoteHideData then
+        state.remoteHide = false
+        refreshRemoteHideUI()
+        return true
+    end
+
+    if not r or not h then
+        local saved = remoteHideData
+        state.remoteHide = false
+        UIS.MouseBehavior = saved.mouseBehavior or Enum.MouseBehavior.Default
+        camera = workspace.CurrentCamera
+        if camera then
+            camera.CameraType = saved.cameraType or Enum.CameraType.Custom
+            local savedSubject = saved.cameraSubject
+            camera.CameraSubject = savedSubject and savedSubject.Parent and savedSubject or humanoid()
+            camera.FieldOfView = saved.fieldOfView or defaults.fov
+        end
+        if remoteCameraAnchor and remoteCameraAnchor.Parent then
+            remoteCameraAnchor:Destroy()
+        end
+        remoteCameraAnchor = nil
+        remoteHideData = nil
+        refreshRemoteHideUI()
+        if not silent then notify("Remote Hide stopped. Your character is respawning, so no return teleport was needed.", "error") end
+        return false
+    end
+
+    -- OFF sequence: freeze FIRST, teleport to the virtual player's position,
+    -- then unfreeze after a physics step (friend's smooth-return method).
+    r.AssemblyLinearVelocity = Vector3.zero
+    r.AssemblyAngularVelocity = Vector3.zero
+    h.WalkSpeed = 0
+    h.JumpPower = 0
+    h.AutoRotate = false
+    h.PlatformStand = true
+    r.Anchored = true
+
+    local returnCFrame = getRemoteReturnCFrame() or remoteHideData.startCFrame
+    r.CFrame = returnCFrame
+    r.AssemblyLinearVelocity = Vector3.zero
+    r.AssemblyAngularVelocity = Vector3.zero
+    RunService.Heartbeat:Wait()
+
+    local snapshot = remoteHideData.characterSnapshot or {}
+    r.Anchored = snapshot.rootAnchored == true
+    h.PlatformStand = snapshot.platformStand == true
+    h.AutoRotate = snapshot.autoRotate ~= false
+    h.UseJumpPower = snapshot.useJumpPower ~= false
+    h.JumpPower = snapshot.jumpPower or defaults.jump
+    h.WalkSpeed = snapshot.walkSpeed or defaults.speed
+    if not r.Anchored then
+        pcall(function() h:ChangeState(Enum.HumanoidStateType.GettingUp) end)
+    end
+
+    local saved = remoteHideData
+    state.remoteHide = false
+    UIS.MouseBehavior = saved.mouseBehavior or Enum.MouseBehavior.Default
+
+    camera = workspace.CurrentCamera
+    if camera then
+        camera.CameraType = saved.cameraType or Enum.CameraType.Custom
+        local savedSubject = saved.cameraSubject
+        if savedSubject == nil or not savedSubject.Parent or savedSubject:IsDescendantOf(saved.originalCharacter or c) then
+            savedSubject = h
+        end
+        camera.CameraSubject = savedSubject
+        camera.FieldOfView = saved.fieldOfView or defaults.fov
+    end
+
+    if remoteCameraAnchor and remoteCameraAnchor.Parent then
+        remoteCameraAnchor:Destroy()
+    end
+    remoteCameraAnchor = nil
+    remoteHideData = nil
+    refreshRemoteHideUI()
+
+    if not silent then notify("Remote Hide disabled. Returned to your virtual position.", "success") end
+    return true
+end
+
+--========================================================
+-- INVENTORY TELEPORT TOOL
+--========================================================
+
+ensureTeleportTool = function()
+    if state.closed then return nil end
+
+    local backpack = player:FindFirstChildOfClass("Backpack") or player:WaitForChild("Backpack", 5)
+    if not backpack then
+        notify("Player inventory is unavailable.", "error")
+        return nil
+    end
+
+    local existing = backpack:FindFirstChild("N45d Teleport")
+        or (character() and character():FindFirstChild("N45d Teleport"))
+
+    if existing and existing:IsA("Tool") then
+        teleportTool = existing
+        return existing
+    end
+
+    local tool = Instance.new("Tool")
+    tool.Name = "N45d Teleport"
+    tool.ToolTip = "Equip, then click/tap a place to teleport there"
+    tool.RequiresHandle = false
+    tool.CanBeDropped = false
+    tool.Parent = backpack
+
+    teleportTool = tool
+
+    if teleportToolConnection then
+        teleportToolConnection:Disconnect()
+        teleportToolConnection = nil
+    end
+
+    teleportToolConnection = tool.Activated:Connect(function()
+        if state.closed then return end
+
+        local r = root()
+        if not r then
+            notify("Character is not ready.", "error")
+            return
+        end
+
+        local mouse = player:GetMouse()
+        local target = mouse and mouse.Target
+        local hit = mouse and mouse.Hit
+
+        if not hit or (not target and hit.Position.Magnitude < 0.01) then
+            notify("Tap or click a place first.")
+            return
+        end
+
+        local destination = hit.Position + Vector3.new(0, 3, 0)
+        r.CFrame = CFrame.new(destination) * r.CFrame.Rotation
+        notify("Teleport requested.", "success")
+    end)
+
+    table.insert(connections, teleportToolConnection)
+    return tool
+end
+
+createSimpleBar()
+
+--==================================================
+-- FEATURE SEARCH
+--========================================================
+
+local featureIndex = {
+    {"Dashboard", "overview status quick actions"},
+    {"Movement", "speed walk jump sprint fly flight dash gravity swim noclip"},
+    {"Player", "player list target spectate camera follow invisibility remote hide fov zoom"},
+    {"Chat", "chat messages quick messages auto reply keyword"},
+    {"Audio", "audio soundboard meme music sound effects text to speech tts volume bruh vine boom metal pipe oof laugh"},
+    {"Server", "server server id job id place id join rejoin teleport retry current instance"},
+    {"Utilities", "commands command bar coordinates reset teleport tool inventory"},
+    {"Settings", "appearance theme color picker accent font transparency interface scale simple ui compact animation controls keybind performance"}
+}
+
+local selectTab
+
+local function runSearch()
+    local query = string.lower(globalSearch.Text:gsub("^%s+", ""):gsub("%s+$", ""))
+
+    if query == "" then
+        notify("Type a feature to search.")
+        return
+    end
+
+    for _, item in ipairs(featureIndex) do
+        local tab = item[1]
+        local searchable = string.lower(tab .. " " .. item[2])
+
+        if searchable:find(query, 1, true) then
+            selectTab(tab)
+            notify("Opened " .. tab .. ".", "success")
+            return
+        end
+    end
+
+    notify("No matching feature found.", "error")
+end
+
+globalSearch.FocusLost:Connect(function(enterPressed)
+    if enterPressed then
+        runSearch()
+    end
+end)
+
+searchButton.Activated:Connect(runSearch)
+
+--==================================================
+-- PAGE: DASHBOARD
+--==================================================
+
+local function showDashboard()
+    section("Overview")
+
+    local h = humanoid()
+    local r = root()
+
+    infoCard("PLAYER", player.DisplayName .. "  @" .. player.Name)
+    infoCard("HEALTH", h and (math.floor(h.Health) .. " / " .. math.floor(h.MaxHealth)) or "Unavailable")
+    infoCard("POSITION", r and (math.floor(r.Position.X) .. ", " .. math.floor(r.Position.Y) .. ", " .. math.floor(r.Position.Z)) or "Unavailable")
+
+    section("Quick actions")
+
+    actionGrid({
+        {
+            "Fly",
+            function()
+                state.flying = not state.flying
+                flyVertical = 0
+                notify("Fly: " .. tostring(state.flying), "success")
+            end
+        },
+        {
+            "Sprint",
+            function()
+                state.sprinting = not state.sprinting
+                applyMovement()
+                notify("Sprint: " .. tostring(state.sprinting))
+            end
+        },
+        {
+            "Infinite Jump",
+            function()
+                state.infiniteJump = not state.infiniteJump
+                notify("Infinite Jump: " .. tostring(state.infiniteJump))
+            end
+        },
+        {
+            "Stop Spectating",
+            function()
+                stopSpectating()
+                notify("Camera restored.")
+            end
+        }
+    })
+
+    section("Current status")
+
+    infoCard("MOVEMENT", state.flying and "Flying"
+        or state.sprinting and "Sprinting"
+        or "Normal")
+
+    infoCard("PLAYER TARGET", selectedPlayer and selectedPlayer.Name or "None")
+
+    infoCard("CAMERA", state.spectating and "Spectating" or "Normal")
+
+    section("Information")
+
+    makeLabel(
+        content,
+        "N45d is a modular LocalScript interface. Some local effects may be overridden by the experience server.",
+        48,
+        10
+    )
+end
+
+--==================================================
+-- PAGE: MOVEMENT
+--==================================================
+
+local function showMovement()
+    section("Movement controls")
+
+    slider("Walk Speed", settings.speed, 0, 150, 1, function(value, finished)
+        settings.speed = value
+        applyMovement()
+
+        if finished then saveSettings() end
+    end, 0)
+
+    slider("Jump Power", settings.jump, 0, 200, 1, function(value, finished)
+        settings.jump = value
+        applyMovement()
+
+        if finished then saveSettings() end
+    end, 0)
+
+    slider("Sprint Speed", settings.sprint, 16, 100, 1, function(value, finished)
+        settings.sprint = value
+        if state.sprinting then applyMovement() end
+
+        if finished then saveSettings() end
+    end, 0)
+
+    slider("Fly Speed", settings.flySpeed, 5, 120, 1, function(value, finished)
+        settings.flySpeed = value
+        if finished then saveSettings() end
+    end, 0)
+
+    slider("Dash Power", settings.dashPower, 10, 150, 1, function(value, finished)
+        settings.dashPower = value
+        if finished then saveSettings() end
+    end, 0)
+
+    slider("Swim Speed", settings.swimSpeed, 8, 80, 1, function(value, finished)
+        settings.swimSpeed = value
+        if finished then saveSettings() end
+    end, 0)
+
+    slider("Local Simulation Gravity", settings.gravity, 0, 500, 1, function(value, finished)
+        settings.gravity = value
+        workspace.Gravity = value
+
+        if finished then saveSettings() end
+    end, 0)
+
+    section("Movement modes")
+
+    toggle("Sprint Mode", state.sprinting, function(value)
+        state.sprinting = value
+        applyMovement()
+    end)
+
+    toggle("Fly", state.flying, function(value)
+        state.flying = value
+        flyVertical = 0
+    end)
+
+    toggle("Infinite Jump", state.infiniteJump, function(value)
+        state.infiniteJump = value
+    end)
+
+    toggle("Noclip", state.noclip, function(value)
+        setNoclip(value)
+    end)
+
+    section("Actions")
+
+    actionGrid({
+        {
+            "Dash Forward",
+            dashCharacter
+        },
+        {
+            "Reset Movement",
+            function()
+                settings.speed = defaults.speed
+                settings.jump = defaults.jump
+                settings.sprint = defaults.sprint
+                settings.flySpeed = defaults.flySpeed
+                settings.dashPower = defaults.dashPower
+                settings.swimSpeed = defaults.swimSpeed
+                settings.gravity = originalGravity
+
+                state.sprinting = false
+                state.flying = false
+
+                setNoclip(false)
+
+                workspace.Gravity = originalGravity
+                applyMovement()
+                saveSettings()
+
+                selectTab("Movement")
+                notify("Movement settings reset.", "success")
+            end
+        }
+    })
+
+    makeLabel(
+        content,
+        "Gravity, flight, noclip and movement changes are local effects. The game server may override them.",
+        43,
+        9
+    )
+end
+
+--==================================================
+-- PAGE: PLAYER
+--==================================================
+
+local function showPlayer()
+    section("Player selection")
+
+    playerList()
+
+    local targetName = infoCard(
+        "SELECTED PLAYER",
+        selectedPlayer and (selectedPlayer.DisplayName .. "  @" .. selectedPlayer.Name) or "None"
+    )
+
+    local targetHealth = infoCard("TARGET HEALTH", "—")
+    local targetDistance = infoCard("DISTANCE", "—")
+
+    local function refreshTarget()
+        local target = selectedPlayer
+        local h = target and target.Character
+            and target.Character:FindFirstChildOfClass("Humanoid")
+
+        local tr = target and target.Character
+            and target.Character:FindFirstChild("HumanoidRootPart")
+
+        local r = root()
+
+        targetName.Text = target and (target.DisplayName .. "  @" .. target.Name) or "None"
+
+        targetHealth.Text = h
+            and (math.floor(h.Health) .. " / " .. math.floor(h.MaxHealth))
+            or "—"
+
+        targetDistance.Text = tr and r
+            and (math.floor((tr.Position - r.Position).Magnitude) .. " studs")
+            or "—"
+    end
+
+    section("Remote Hide")
+    local remoteHidePageButton
+    remoteHidePageButton = button(state.remoteHide and "DISABLE REMOTE HIDE" or "ENABLE REMOTE HIDE", function()
+        setRemoteHide(not state.remoteHide)
+        if remoteHidePageButton then
+            remoteHidePageButton.Text = state.remoteHide and "DISABLE REMOTE HIDE" or "ENABLE REMOTE HIDE"
+        end
+    end)
+    makeLabel(content, "Experimental client-side remote hold with an independent camera. Other players may still see the remote character, and the server can correct its position.", 48, 9)
+
+    section("Spectate")
+
+    infoCard("CAMERA STATUS", state.spectating and "Spectating" or "Normal")
+
+    actionGrid({
+        {
+            "Choose & Spectate",
+            openSpectatePicker
+        },
+        {
+            "Stop Spectating",
+            function()
+                stopSpectating()
+                notify("Camera restored.", "success")
+            end
+        },
+        {
+            "Refresh Target",
+            refreshTarget
+        },
+        {
+            "Reset Character",
+            resetCharacter
+        }
+    })
+
+    section("Camera controls")
+
+    slider("Field of View", settings.fov, 40, 110, 1, function(value, finished)
+        settings.fov = value
+
+        if workspace.CurrentCamera then
+            workspace.CurrentCamera.FieldOfView = value
+        end
+
+        if finished then saveSettings() end
+    end, 0)
+
+    slider("Minimum Zoom", settings.zoomMin, 0.5, 20, 0.5, function(value, finished)
+        settings.zoomMin = value
+
+        player.CameraMinZoomDistance = math.min(value, settings.zoomMax)
+
+        if finished then saveSettings() end
+    end, 1)
+
+    slider("Maximum Zoom", settings.zoomMax, 5, 400, 1, function(value, finished)
+        settings.zoomMax = value
+
+        player.CameraMaxZoomDistance = math.max(value, settings.zoomMin)
+
+        if finished then saveSettings() end
+    end, 0)
+
+    section("Local appearance")
+
+    toggle("Local Invisibility", state.invisible, function(value)
+        setInvisible(value)
+    end)
+
+    makeLabel(
+        content,
+        "Spectate changes your local camera. Local invisibility does not make your character invisible to other players.",
+        43,
+        9
+    )
+end
+
+--==================================================
+-- PAGE: CHAT
+--==================================================
+
+local function showChat()
+    section("Message composer")
+
+    local messageBox = textEntry(
+        "MESSAGE",
+        "",
+        "Write a message..."
+    )
+
+    button("SEND MESSAGE", function()
+        local ok, message = sendChat(messageBox.Text)
+
+        notify(message, ok and "success" or "error")
+
+        if ok then
+            messageBox.Text = ""
+        end
+    end)
+
+    section("Quick messages")
+
+    local presets = {
+        "Hello!",
+        "Thanks!",
+        "Follow me!",
+        "Good game!",
+        "BRB",
+        "Goodbye!"
+    }
+
+    local presetItems = {}
+
+    for _, preset in ipairs(presets) do
+        table.insert(presetItems, {
+            preset,
+            function()
+                local ok, message = sendChat(preset)
+                notify(message, ok and "success" or "error")
+            end
+        })
+    end
+
+    actionGrid(presetItems)
+
+    section("Auto reply")
+
+    toggle("Enable Custom Auto Reply", state.autoChat, function(value)
+        state.autoChat = value
+
+        if value and settings.replyKeyword == "" then
+            notify("Set a keyword before enabling useful replies.")
+        end
+    end)
+
+    textEntry(
+        "TRIGGER KEYWORD",
+        settings.replyKeyword,
+        "Example: hello",
+        function(value)
+            settings.replyKeyword = value
+            saveSettings()
+        end
+    )
+
+    textEntry(
+        "REPLY MESSAGE",
+        settings.replyText,
+        "Your automatic reply",
+        function(value)
+            settings.replyText = value
+            saveSettings()
+        end
+    )
+
+    slider("Reply Cooldown", settings.chatCooldown, 5, 60, 1, function(value, finished)
+        settings.chatCooldown = value
+        if finished then saveSettings() end
+    end, 0)
+
+    makeLabel(
+        content,
+        "Auto reply only responds when your configured keyword is found. Messages remain subject to Roblox chat filtering and restrictions.",
+        49,
+        9
+    )
+end
+
+--==================================================
+-- PAGE: UTILITIES
+--==================================================
+
+local function showUtilities()
+    section("Utility center")
+
+    local h = humanoid()
+    local r = root()
+
+    infoCard("SERVER PLAYERS", #Players:GetPlayers())
+    infoCard("CURRENT HEALTH", h and (math.floor(h.Health) .. " / " .. math.floor(h.MaxHealth)) or "Unavailable")
+
+    local positionCard = infoCard(
+        "COORDINATES",
+        r and (
+            math.floor(r.Position.X) .. ", "
+            .. math.floor(r.Position.Y) .. ", "
+            .. math.floor(r.Position.Z)
+        ) or "Unavailable"
+    )
+
+    button("REFRESH INFORMATION", function()
+        local currentHumanoid = humanoid()
+        local currentRoot = root()
+
+        positionCard.Text = currentRoot and (
+            math.floor(currentRoot.Position.X) .. ", "
+            .. math.floor(currentRoot.Position.Y) .. ", "
+            .. math.floor(currentRoot.Position.Z)
+        ) or "Unavailable"
+
+        notify("Information refreshed.", "success")
+    end)
+
+    section("Command center")
+
+    local output = infoCard("COMMAND OUTPUT", "Ready")
+
+    local commandBox = textEntry(
+        "LOCAL COMMAND",
+        "",
+        "Example: speed 32"
+    )
+
+    local function execute()
+        local ok, message = runCommand(commandBox.Text)
+
+        output.Text = (ok and "✓ " or "✕ ") .. tostring(message)
+
+        notify(message, ok and "success" or "error")
+    end
+
+    button("RUN COMMAND", execute)
+
+    button("COMMAND HELP", function()
+        output.Text = runCommand("help")
+    end)
+
+    section("Available commands")
+
+    for _, item in ipairs(commandLibrary) do
+        local frame = create("Frame", {
+            Size = UDim2.new(1, -4, 0, 56),
+            BackgroundColor3 = C.card
+        }, content)
+
+        corner(frame, 8)
+
+        local name = makeLabel(frame, item.name, 18, 11)
+        name.Position = UDim2.fromOffset(8, 3)
+        name.Font = Enum.Font.GothamBold
+        name.TextColor3 = C.light
+
+        local description = makeLabel(frame, item.description, 18, 9)
+        description.Position = UDim2.fromOffset(8, 23)
+        description.TextColor3 = C.muted
+    end
+
+    section("Teleport tool")
+
+    button("ADD / RESTORE TELEPORT TOOL", function()
+        local tool = ensureTeleportTool()
+        if tool then
+            notify("N45d Teleport added to your inventory.", "success")
+        end
+    end)
+
+    makeLabel(
+        content,
+        "Equip N45d Teleport from your hotbar, then click or tap a solid surface. It moves your local character; the experience server may correct or reject the movement.",
+        48,
+        9
+    )
+
+    section("Quick utilities")
+
+    actionGrid({
+        {
+            "Reset Camera",
+            function()
+                stopSpectating()
+
+                settings.fov = defaults.fov
+                settings.zoomMin = defaults.zoomMin
+                settings.zoomMax = defaults.zoomMax
+
+                player.CameraMinZoomDistance = settings.zoomMin
+                player.CameraMaxZoomDistance = settings.zoomMax
+
+                if workspace.CurrentCamera then
+                    workspace.CurrentCamera.FieldOfView = settings.fov
+                end
+
+                saveSettings()
+                notify("Camera reset.", "success")
+            end
+        },
+        {
+            "Stand / Recover",
+            function()
+                local currentHumanoid = humanoid()
+
+                if currentHumanoid then
+                    currentHumanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+                end
+            end
+        },
+        {
+            "Jump",
+            function()
+                local currentHumanoid = humanoid()
+
+                if currentHumanoid then
+                    currentHumanoid.Jump = true
+                end
+            end
+        },
+        {
+            "Sit / Stand",
+            function()
+                local currentHumanoid = humanoid()
+
+                if currentHumanoid then
+                    currentHumanoid.Sit = not currentHumanoid.Sit
+                end
+            end
+        }
+    })
+end
+
+--==================================================
+-- PAGE: SERVER
+--==================================================
+
+local function selectTextForCopy(textBox)
+    if not textBox or textBox.Text == "" then
+        notify("There is no Server ID to select.", "error")
+        return
+    end
+    textBox:CaptureFocus()
+    textBox.SelectionStart = 1
+    textBox.CursorPosition = #textBox.Text + 1
+    notify("Server ID selected. Use Copy on your keyboard or mobile text menu.")
+end
+
+local function attemptServerTeleport(request)
+    if state.closed or not request or lastServerTeleport ~= request then return end
+    request.attempts = (request.attempts or 0) + 1
+    request.retryQueued = false
+
+    local ok, err = pcall(function()
+        TeleportService:TeleportToPlaceInstance(request.placeId, request.jobId, player)
+    end)
+
+    if not ok then
+        if request.attempts < 3 then
+            request.retryQueued = true
+            task.delay(1.5, function()
+                if state.closed or lastServerTeleport ~= request then return end
+                attemptServerTeleport(request)
+            end)
+        else
+            notify("Teleport failed: " .. tostring(err), "error")
+        end
+    elseif request.attempts == 1 then
+        notify("Teleport request sent. Roblox is connecting you to that server.", "success")
+    else
+        notify("Teleport retry sent (attempt " .. request.attempts .. ").", "success")
+    end
+end
+
+local function requestServerTeleport(jobId, label)
+    jobId = tostring(jobId or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if #jobId < 10 or #jobId > 80 or not jobId:match("^[%w%-]+$") then
+        notify("Enter a valid Server Job ID.", "error")
+        return
+    end
+    if game.PlaceId <= 0 or game.JobId == "" then
+        notify("Server teleport is unavailable in this Studio session.", "error")
+        return
+    end
+
+    local request = {
+        jobId = jobId,
+        placeId = game.PlaceId,
+        attempts = 0,
+        retryQueued = false,
+        label = label or "server"
+    }
+    lastServerTeleport = request
+    attemptServerTeleport(request)
+end
+
+local function retryLastServerTeleport()
+    if not lastServerTeleport then
+        notify("There is no failed or previous Server ID to retry.", "error")
+        return
+    end
+    lastServerTeleport.attempts = 0
+    lastServerTeleport.retryQueued = false
+    attemptServerTeleport(lastServerTeleport)
+end
+
+local function showServer()
+    section("Current server")
+    local jobId = game.JobId or ""
+    local isPrivate = game.PrivateServerId ~= ""
+    infoCard("PLACE ID", game.PlaceId)
+    infoCard("SERVER TYPE", isPrivate and (game.PrivateServerOwnerId == 0 and "Reserved" or "Private") or "Public")
+
+    local currentIdBox = textEntry("CURRENT SERVER JOB ID", jobId, "Unavailable in Studio")
+    currentIdBox.TextEditable = false
+    button("SELECT / COPY SERVER ID", function()
+        selectTextForCopy(currentIdBox)
+    end)
+
+    makeLabel(content, "Roblox LocalScripts do not have a general clipboard-write API. This selects the ID so you can copy it using your device's normal text-selection menu or Ctrl+C.", 48, 9)
+
+    section("Join a server")
+    serverJoinBox = textEntry("TARGET SERVER JOB ID", "", "Paste a server Job ID")
+    button("JOIN SERVER ID", function()
+        requestServerTeleport(serverJoinBox.Text, "manual join")
+    end)
+
+    actionGrid({
+        {"REJOIN CURRENT SERVER", function()
+            if game.JobId == "" then
+                notify("Current server Job ID is unavailable.", "error")
+            else
+                requestServerTeleport(game.JobId, "rejoin")
+            end
+        end},
+        {"RETRY LAST TELEPORT", retryLastServerTeleport}
+    })
+
+    makeLabel(content, "Server IDs only target this Place ID. Reserved servers may require an access code instead of a Job ID. Teleports can fail if the instance is full, closed, or unavailable.", 52, 9)
+    makeLabel(content, "Retry runs only while this client is still connected. A LocalScript stops when the game fully disconnects, so it cannot automatically reconnect after a complete disconnection.", 52, 9)
+end
+
+--==================================================
+-- PAGE: AUDIO
+--==================================================
+
+local function stopAudioPreview()
+    if previewSound then
+        previewSound:Stop()
+        previewSound:Destroy()
+        previewSound = nil
+    end
+end
+
+local memeSoundCategories = {
+    {"Funny", {
+        {"BRUH", "6349641063"},
+        {"VINE BOOM", "6308606116"},
+        {"METAL PIPE", "17726923018"}
+    }},
+    {"Reactions", {
+        {"LAUGH", "7417565680"}
+    }},
+    {"Classic", {
+        {"CLASSIC OOF", "879938225"}
+    }}
+}
+
+local function playLocalAudio(assetId, soundName)
+    local id = tostring(assetId or ""):match("%d+")
+    if not id then
+        notify("Invalid audio asset ID.", "error")
+        return false
+    end
+
+    stopAudioPreview()
+    local sound = Instance.new("Sound")
+    sound.Name = "N45dLocalSoundboard"
+    sound.SoundId = "rbxassetid://" .. id
+    sound.Volume = audioVolume
+    sound.Looped = false
+    sound.Parent = SoundService
+    previewSound = sound
+
+    sound.Ended:Connect(function()
+        if previewSound == sound then
+            sound:Destroy()
+            previewSound = nil
+        end
+    end)
+
+    sound:Play()
+    task.delay(8, function()
+        if previewSound == sound and sound.Parent and not sound.IsLoaded then
+            notify((soundName or "Audio") .. " hasn't loaded. The asset may be restricted or unavailable in this experience.", "error")
+        end
+    end)
+    return true
+end
+
+local function showAudio()
+    section("Local meme soundboard")
+    makeLabel(content, "One-tap sound effects. Playback is local to your client, so only you hear these sounds. Previous audio stops when another sound is selected.", 48, 9)
+
+    for _, category in ipairs(memeSoundCategories) do
+        section(category[1])
+        local soundItems = {}
+        for _, item in ipairs(category[2]) do
+            local soundName, assetId = item[1], item[2]
+            table.insert(soundItems, {
+                soundName,
+                function() playLocalAudio(assetId, soundName) end
+            })
+        end
+        actionGrid(soundItems)
+    end
+    button("STOP SOUND", stopAudioPreview)
+
+    section("Custom local audio")
+    local soundIdBox = textEntry("ROBLOX AUDIO ASSET ID", "", "Paste an approved audio asset ID")
+    slider("Playback Volume", audioVolume, 0, 1, 0.05, function(value, finished)
+        audioVolume = value
+        if previewSound then previewSound.Volume = value end
+    end, 2)
+    button("PLAY LOCAL AUDIO", function()
+        local raw = soundIdBox.Text:gsub("%s+", "")
+        local id = raw:match("(%d+)")
+        if not id then
+            notify("Enter a valid Roblox audio asset ID.", "error")
+            return
+        end
+        playLocalAudio(id, "Custom audio")
+    end)
+
+    section("TTS audio")
+    local ttsBox = textEntry("PRE-GENERATED TTS AUDIO ID", "", "Paste an uploaded speech audio ID")
+    button("PLAY TTS AUDIO", function()
+        local raw = ttsBox.Text:gsub("%s+", "")
+        local id = raw:match("(%d+)")
+        if not id then
+            notify("Paste a pre-generated TTS audio asset ID.", "error")
+            return
+        end
+        playLocalAudio(id, "TTS audio")
+    end)
+
+    makeLabel(content, "Soundboard assets are listed in Roblox Creator Store. Roblox audio privacy and moderation still apply, so a sound may fail to load in a particular experience. This LocalScript cannot generate TTS or send sounds through voice chat.", 57, 9)
+end
+
+--==================================================
+-- SETTINGS: APPEARANCE
+--==================================================
+
+local function showAppearance()
+    section("Appearance")
+
+    choice(
+        "Theme preset",
+        ({"Navy Blue", "Purple", "Teal", "Rose"})[settings.theme],
+        {"Navy Blue", "Purple", "Teal", "Rose"},
+        function(value)
+            local map = {
+                ["Navy Blue"] = 1,
+                ["Purple"] = 2,
+                ["Teal"] = 3,
+                ["Rose"] = 4
+            }
+
+            settings.theme = map[value]
+            settings.accentHex = ""
+            refreshTheme()
+            saveSettings()
+            selectTab("Settings")
+        end
+    )
+
+    section("Full UI color picker")
+
+    local currentAccent = parseHex(settings.accentHex) or C.blue
+    local hue, saturation, brightness = currentAccent:ToHSV()
+
+    local preview = create("Frame", {
+        Size = UDim2.new(1, -4, 0, 39),
+        BackgroundColor3 = currentAccent,
+        BorderSizePixel = 0
+    }, content)
+    corner(preview, 9)
+    outline(preview, C.light, 1)
+
+    local previewLabel = create("TextLabel", {
+        Size = UDim2.fromScale(1, 1),
+        BackgroundTransparency = 1,
+        Text = "LIVE ACCENT PREVIEW  •  " .. (settings.accentHex ~= "" and settings.accentHex or currentAccent:ToHex()),
+        TextColor3 = Color3.new(1, 1, 1),
+        Font = Enum.Font.GothamBold,
+        TextSize = 10
+    }, preview)
+
+    local function colorToHex(color)
+        return string.format("#%02X%02X%02X",
+            math.floor(color.R * 255 + 0.5),
+            math.floor(color.G * 255 + 0.5),
+            math.floor(color.B * 255 + 0.5)
+        )
+    end
+
+    local function applyPickedColor(saveNow)
+        local chosen = Color3.fromHSV(hue, saturation, brightness)
+        settings.accentHex = colorToHex(chosen)
+        refreshTheme()
+        preview.BackgroundColor3 = C.blue
+        previewLabel.Text = "LIVE ACCENT PREVIEW  •  " .. settings.accentHex
+        if saveNow then saveSettings() end
+    end
+
+    slider("Hue", hue, 0, 1, 0.01, function(value, finished)
+        hue = value
+        applyPickedColor(finished)
+    end, 2)
+
+    slider("Saturation", saturation, 0, 1, 0.01, function(value, finished)
+        saturation = value
+        applyPickedColor(finished)
+    end, 2)
+
+    slider("Brightness", brightness, 0.2, 1, 0.01, function(value, finished)
+        brightness = value
+        applyPickedColor(finished)
+    end, 2)
+
+    textEntry(
+        "HEX COLOR",
+        settings.accentHex,
+        "Example: #4C86D6",
+        function(value)
+            local color = parseHex(value)
+            if not color then
+                notify("Enter a valid 6-digit HEX color.", "error")
+                return
+            end
+            local clean = colorToHex(color)
+            settings.accentHex = clean
+            hue, saturation, brightness = color:ToHSV()
+            refreshTheme()
+            saveSettings()
+            notify("Accent applied to the whole interface.", "success")
+            selectTab("Settings")
+        end
+    )
+
+    section("Quick color presets")
+    actionGrid({
+        {"Ice Blue", function() settings.accentHex = "#4C86D6"; refreshTheme(); saveSettings(); selectTab("Settings") end},
+        {"Soft Cyan", function() settings.accentHex = "#54A9C2"; refreshTheme(); saveSettings(); selectTab("Settings") end},
+        {"Mint", function() settings.accentHex = "#69A98E"; refreshTheme(); saveSettings(); selectTab("Settings") end},
+        {"Violet", function() settings.accentHex = "#8B72C8"; refreshTheme(); saveSettings(); selectTab("Settings") end},
+        {"Rose", function() settings.accentHex = "#C0789F"; refreshTheme(); saveSettings(); selectTab("Settings") end},
+        {"Amber", function() settings.accentHex = "#C69B55"; refreshTheme(); saveSettings(); selectTab("Settings") end}
+    })
+
+    section("40-color palette  •  10 × 4")
+    local palette = create("Frame", {
+        Size = UDim2.new(1, -4, 0, 108),
+        BackgroundTransparency = 1
+    }, content)
+    create("UIGridLayout", {
+        CellSize = UDim2.new(0.1, -4, 0, 22),
+        CellPadding = UDim2.fromOffset(3, 4),
+        FillDirectionMaxCells = 10,
+        SortOrder = Enum.SortOrder.LayoutOrder
+    }, palette)
+
+    local paletteRows = {
+        {0.95, 0.92},
+        {0.62, 1.00},
+        {0.88, 0.68},
+        {0.48, 0.82}
+    }
+    for rowIndex, pair in ipairs(paletteRows) do
+        for colIndex = 1, 10 do
+            local hueValue = (colIndex - 1) / 10
+            local swatchColor = Color3.fromHSV(hueValue, pair[1], pair[2])
+            local swatch = create("TextButton", {
+                Size = UDim2.fromOffset(22, 22),
+                BackgroundColor3 = swatchColor,
+                Text = "",
+                AutoButtonColor = false,
+                LayoutOrder = (rowIndex - 1) * 10 + colIndex
+            }, palette)
+            corner(swatch, 5)
+            outline(swatch, C.text, 0.5)
+            swatch.Activated:Connect(function()
+                settings.accentHex = colorToHex(swatchColor)
+                hue, saturation, brightness = swatchColor:ToHSV()
+                refreshTheme()
+                saveSettings()
+                notify("Color selected: " .. settings.accentHex, "success")
+                selectTab("Settings")
+            end)
+        end
+    end
+
+    makeLabel(
+        content,
+        "The accent color is shared by outlines, buttons, sliders, navigation, the floating N button and touch quick controls. Theme presets still control the dark background palette.",
+        48,
+        9
+    )
+
+    choice(
+        "Font",
+        ({"Gotham", "Gotham Medium", "Gotham Bold", "Source Sans", "Code"})[settings.font],
+        {"Gotham", "Gotham Medium", "Gotham Bold", "Source Sans", "Code"},
+        function(value)
+            local map = {
+                ["Gotham"] = 1,
+                ["Gotham Medium"] = 2,
+                ["Gotham Bold"] = 3,
+                ["Source Sans"] = 4,
+                ["Code"] = 5
+            }
+
+            settings.font = map[value]
+            applyTextSettings()
+            saveSettings()
+            selectTab("Settings")
+        end
+    )
+
+    slider("Text Size", settings.textSize, 10, 18, 1, function(value, finished)
+        settings.textSize = value
+        applyTextSettings()
+        if finished then saveSettings() end
+    end, 0)
+
+    slider("Panel Transparency", settings.transparency, 0, 0.5, 0.01, function(value, finished)
+        settings.transparency = value
+        main.BackgroundTransparency = value
+        if finished then saveSettings() end
+    end, 2)
+
+    slider("Corner Radius", settings.radius, 4, 24, 1, function(value, finished)
+        settings.radius = value
+        if finished then
+            saveSettings()
+            selectTab("Settings")
+        end
+    end, 0)
+
+    slider("Outline Thickness", settings.outline, 0, 5, 0.5, function(value, finished)
+        settings.outline = value
+        mainStroke.Thickness = value
+        logoStroke.Thickness = value
+        floatingStroke.Thickness = value
+        if finished then saveSettings() end
+    end, 1)
+end
+
+--==================================================
+-- SETTINGS: INTERFACE
+--==================================================
+
+local function showInterface()
+    section("Interface behavior")
+
+    slider("UI Scale", settings.uiScale, 0.85, 1.12, 0.01, function(value, finished)
+        settings.uiScale = value
+        resizePanel()
+
+        if finished then saveSettings() end
+    end, 2)
+
+    toggle("Simple UI Mode", state.simple, function(value)
+        setSimpleMode(value)
+    end)
+
+    button("MINIMIZE PANEL", minimize)
+
+    button("TOGGLE MAXIMIZE", function()
+        maximize(not state.maximized)
+    end)
+
+    button("RESTORE NORMAL SIZE", function()
+        state.maximized = false
+        settings.uiScale = 1
+
+        resizePanel()
+        saveSettings()
+    end)
+
+    makeLabel(
+        content,
+        "Use the ^ header control for Simple UI. The floating N restores a minimized panel. On touch devices, quick actions stay available beside the Roblox movement controls.",
+        53,
+        9
+    )
+end
+
+--==================================================
+-- SETTINGS: ANIMATIONS
+--==================================================
+
+local function showAnimations()
+    section("Animation settings")
+
+    toggle("Enable Animations", settings.animations, function(value)
+        settings.animations = value
+        saveSettings()
+    end)
+
+    toggle("Animated Border", settings.borderAnimation, function(value)
+        settings.borderAnimation = value
+        saveSettings()
+    end)
+
+    toggle("Floating N Animation", settings.floatingAnimation, function(value)
+        settings.floatingAnimation = value
+        saveSettings()
+    end)
+
+    toggle("Panel Transitions", settings.panelAnimation, function(value)
+        settings.panelAnimation = value
+        saveSettings()
+    end)
+
+    toggle("Button Feedback", settings.buttonAnimation, function(value)
+        settings.buttonAnimation = value
+        saveSettings()
+    end)
+
+    toggle("Reduced Motion", settings.reduceMotion, function(value)
+        settings.reduceMotion = value
+        saveSettings()
+    end)
+
+    slider("Animation Speed", settings.animationSpeed, 0.1, 2, 0.05, function(value, finished)
+        settings.animationSpeed = value
+        if finished then saveSettings() end
+    end, 2)
+end
+
+--==================================================
+-- SETTINGS: CONTROLS
+--==================================================
+
+local function showControls()
+    section("Keyboard controls")
+
+    infoCard("TOGGLE KEY", settings.keybind)
+
+    keyCaptureButton = button("CHANGE TOGGLE KEY", function()
+        capturingKey = true
+        keyCaptureButton.Text = "PRESS A KEY..."
+
+        notify("Press a keyboard key. Escape cancels.")
+
+        task.delay(8, function()
+            if capturingKey then
+                capturingKey = false
+
+                if keyCaptureButton and keyCaptureButton.Parent then
+                    keyCaptureButton.Text = "CHANGE TOGGLE KEY"
+                end
+
+                notify("Key capture timed out.")
+            end
+        end)
+    end)
+
+    button("RESTORE DEFAULT KEY", function()
+        settings.keybind = defaults.keybind
+        saveSettings()
+        selectTab("Settings")
+    end)
+
+    makeLabel(
+        content,
+        "The toggle key works on keyboard devices. Mobile users can use the floating N button.",
+        42,
+        9
+    )
+end
+
+--==================================================
+-- SETTINGS: PERFORMANCE
+--==================================================
+
+local function showPerformance()
+    section("Performance")
+
+    toggle("Performance Mode", settings.performanceMode, function(value)
+        settings.performanceMode = value
+        saveSettings()
+    end)
+
+    toggle("Reduce Motion", settings.reduceMotion, function(value)
+        settings.reduceMotion = value
+        saveSettings()
+    end)
+
+    makeLabel(
+        content,
+        "Performance Mode reduces decorative animation updates. It does not disable movement or input handling.",
+        47,
+        9
+    )
+end
+
+--==================================================
+-- SETTINGS: GENERAL
+--==================================================
+
+local function showGeneral()
+    section("General settings")
+
+    button("SAVE SETTINGS", function()
+        saveSettings()
+        notify("Settings saved for this session.", "success")
+    end)
+
+    button("LOAD SAVED SETTINGS", function()
+        for key, defaultValue in pairs(defaults) do
+            local saved = player:GetAttribute("N45d_" .. key)
+
+            settings[key] = saved ~= nil and saved or defaultValue
+        end
+
+        refreshTheme()
+        applyTextSettings()
+        state.simple = settings.simpleUI == true
+        state.maximized = false
+
+        main.BackgroundTransparency = settings.transparency
+
+        applyMovement()
+        resizePanel()
+
+        selectTab("Settings")
+        notify("Settings loaded.", "success")
+    end)
+
+    button("RESET ALL SETTINGS", function()
+        for key, value in pairs(defaults) do
+            settings[key] = value
+        end
+
+        state.flying = false
+        state.sprinting = false
+        state.infiniteJump = false
+        state.autoChat = false
+        state.simple = false
+        state.maximized = false
+
+        setNoclip(false)
+        setInvisible(false)
+        stopSpectating()
+
+        workspace.Gravity = originalGravity
+
+        player.CameraMinZoomDistance = originalMinZoom
+        player.CameraMaxZoomDistance = originalMaxZoom
+
+        if workspace.CurrentCamera then
+            workspace.CurrentCamera.FieldOfView = originalFov or defaults.fov
+        end
+
+        refreshTheme()
+        applyTextSettings()
+
+        main.BackgroundTransparency = 0
+
+        applyMovement()
+        saveSettings()
+        resizePanel()
+
+        selectTab("Settings")
+        notify("Settings reset.", "success")
+    end)
+
+    button("CLOSE PANEL", function()
+        gui:Destroy()
+    end)
+
+    makeLabel(
+        content,
+        "Settings are held on the local Player instance during this session. A standalone LocalScript cannot guarantee cross-session DataStore persistence.",
+        55,
+        9
+    )
+end
+
+--==================================================
+-- SETTINGS PAGE
+--==================================================
+
+local settingsCategories = {
+    "Appearance",
+    "Interface",
+    "Animations",
+    "Controls",
+    "Performance",
+    "General"
+}
+
+local function showSettings()
+    section("Settings")
+
+    choice(
+        "Settings category",
+        settingsPage,
+        settingsCategories,
+        function(value)
+            settingsPage = value
+            selectTab("Settings")
+        end
+    )
+
+    if settingsPage == "Appearance" then
+        showAppearance()
+
+    elseif settingsPage == "Interface" then
+        showInterface()
+
+    elseif settingsPage == "Animations" then
+        showAnimations()
+
+    elseif settingsPage == "Controls" then
+        showControls()
+
+    elseif settingsPage == "Performance" then
+        showPerformance()
+
+    elseif settingsPage == "General" then
+        showGeneral()
+    end
+end
+
+--==================================================
+-- CONTEXTUAL TAB RESET
+--==================================================
+
+local function resetCurrentTab(name)
+    if name == "Movement" then
+        settings.speed, settings.jump = defaults.speed, defaults.jump
+        settings.sprint, settings.flySpeed = defaults.sprint, defaults.flySpeed
+        settings.dashPower, settings.swimSpeed = defaults.dashPower, defaults.swimSpeed
+        settings.gravity = defaults.gravity
+        state.sprinting, state.flying, state.infiniteJump = false, false, false
+        setNoclip(false)
+        workspace.Gravity = defaults.gravity
+        applyMovement()
+    elseif name == "Player" then
+        if state.remoteHide then setRemoteHide(false) end
+        setInvisible(false)
+        stopSpectating()
+        selectedPlayer = nil
+        settings.fov, settings.zoomMin, settings.zoomMax = defaults.fov, defaults.zoomMin, defaults.zoomMax
+        player.CameraMinZoomDistance, player.CameraMaxZoomDistance = defaults.zoomMin, defaults.zoomMax
+        if workspace.CurrentCamera then workspace.CurrentCamera.FieldOfView = defaults.fov end
+    elseif name == "Chat" then
+        settings.replyKeyword, settings.replyText = defaults.replyKeyword, defaults.replyText
+        settings.chatCooldown = defaults.chatCooldown
+        state.autoChat = false
+    elseif name == "Audio" then
+        stopAudioPreview()
+        audioVolume = 0.65
+    elseif name == "Server" then
+        lastServerTeleport = nil
+        if serverJoinBox then serverJoinBox.Text = "" end
+    elseif name == "Utilities" then
+        stopSpectating()
+    elseif name == "Settings" then
+        if settingsPage == "Appearance" then
+            settings.theme, settings.accentHex, settings.font = defaults.theme, defaults.accentHex, defaults.font
+            settings.textSize, settings.transparency = defaults.textSize, defaults.transparency
+            settings.radius, settings.outline = defaults.radius, defaults.outline
+            refreshTheme()
+            main.BackgroundTransparency = defaults.transparency
+        elseif settingsPage == "Interface" then
+            settings.uiScale, settings.simpleUI = defaults.uiScale, defaults.simpleUI
+            state.simple, state.maximized = false, false
+            resizePanel()
+        elseif settingsPage == "Animations" then
+            for _, key in ipairs({"animationSpeed", "animations", "panelAnimation", "borderAnimation", "buttonAnimation", "floatingAnimation", "reduceMotion"}) do settings[key] = defaults[key] end
+        elseif settingsPage == "Controls" then
+            settings.keybind = defaults.keybind
+        elseif settingsPage == "Performance" then
+            settings.performanceMode, settings.reduceMotion = defaults.performanceMode, defaults.reduceMotion
+        end
+        applyTextSettings()
+    end
+    saveSettings()
+    selectTab(name)
+    notify(name .. " tab restored to defaults.", "success")
+end
+
+--==================================================
+-- TAB ROUTER
+--==================================================
+
+local function showTab(name)
+    clearContent()
+
+    if name == "Dashboard" then
+        showDashboard()
+
+    elseif name == "Movement" then
+        showMovement()
+
+    elseif name == "Player" then
+        showPlayer()
+
+    elseif name == "Chat" then
+        showChat()
+
+    elseif name == "Audio" then
+        showAudio()
+
+    elseif name == "Server" then
+        showServer()
+
+    elseif name == "Utilities" then
+        showUtilities()
+
+    elseif name == "Settings" then
+        showSettings()
+    end
+
+    if name ~= "Dashboard" then
+        actionButton(content, "RESET " .. string.upper(name) .. " TAB", function()
+            resetCurrentTab(name)
+        end, UDim2.new(1, -4, 0, 32))
+    end
+
+    if settings.panelAnimation and settings.animations and not settings.reduceMotion then
+        local basePosition = content.Position
+
+        content.Position = basePosition + UDim2.fromOffset(7, 0)
+
+        animate(content, {
+            Position = basePosition
+        }, 0.17)
+    end
+end
+
+--==================================================
+-- NAVIGATION
+--==================================================
+
+local tabs = {
+    "Dashboard",
+    "Movement",
+    "Player",
+    "Chat",
+    "Audio",
+    "Server",
+    "Utilities",
+    "Settings"
+}
+
+selectTab = function(name)
+    currentTab = name
+
+    for tab, buttonObject in pairs(tabButtons) do
+        local active = tab == name
+
+        animate(buttonObject, {
+            BackgroundColor3 = active and C.card or C.side,
+            TextColor3 = active and C.light or C.muted
+        }, 0.12)
+    end
+
+    showTab(name)
+end
+
+for index, name in ipairs(tabs) do
+    local b = actionButton(
+        tabList,
+        name,
+        function()
+            selectTab(name)
+        end,
+        UDim2.new(1, 0, 0, 37)
+    )
+
+    b.LayoutOrder = index
+    b.BackgroundColor3 = C.side
+    b.TextColor3 = C.muted
+
+    tabButtons[name] = b
+end
+
+--==================================================
+-- FLY TOUCH CONTROLS
+--==================================================
+
+local function flyButton(text, offsetY, value)
+    local b = create("TextButton", {
+        AnchorPoint = Vector2.new(1, 1),
+
+        Position = UDim2.new(1, -17, 1, offsetY),
+        Size = UDim2.fromOffset(60, 45),
+
+        BackgroundColor3 = C.card,
+
+        Text = text,
+        TextColor3 = C.text,
+
+        Font = Enum.Font.GothamBold,
+        TextSize = 11,
+
+        AutoButtonColor = false,
+        Active = true,
+
+        Visible = false,
+        ZIndex = 50
+    }, gui)
+
+    corner(b, 10)
+    outline(b, C.blue, 1)
+
+    local heldInput
+
+    b.InputBegan:Connect(function(input)
+        if not state.flying then return end
+
+        if input.UserInputType == Enum.UserInputType.Touch
+            or input.UserInputType == Enum.UserInputType.MouseButton1 then
+
+            heldInput = input
+            flyVertical = value
+        end
+    end)
+
+    b.InputEnded:Connect(function(input)
+        if heldInput and input == heldInput then
+            heldInput = nil
+
+            if flyVertical == value then
+                flyVertical = 0
+            end
+        end
+    end)
+
+    return b
+end
+
+local flyUp = flyButton("UP", -118, 1)
+local flyDown = flyButton("DOWN", -65, -1)
+
+--========================================================
+-- REMOTE CAMERA CONTROL HINT
+-- Uses Roblox's native Dynamic Thumbstick / keyboard controls.
+--========================================================
+
+remoteControls = create("Frame", {
+    Name = "N45dRemoteCameraHint",
+    AnchorPoint = Vector2.new(0.5, 1),
+    Position = UDim2.new(0.5, 0, 1, -18),
+    Size = UDim2.fromOffset(250, 30),
+    BackgroundColor3 = C.panel,
+    BackgroundTransparency = 0.12,
+    BorderSizePixel = 0,
+    Visible = false,
+    ZIndex = 48
+}, gui)
+corner(remoteControls, 9)
+outline(remoteControls, C.blue, 1)
+
+create("TextLabel", {
+    Size = UDim2.new(1, -12, 1, 0),
+    Position = UDim2.fromOffset(6, 0),
+    BackgroundTransparency = 1,
+    Text = "MOVE: Roblox joystick / WASD     LOOK: normal camera",
+    TextColor3 = C.muted,
+    Font = Enum.Font.GothamMedium,
+    TextSize = 9,
+    TextWrapped = true,
+    ZIndex = 49
+}, remoteControls)
+
+--========================================================
+-- TOUCH QUICK ACTIONS
+--========================================================
+
+quickActions = create("Frame", {
+    Name = "N45dQuickActions",
+    AnchorPoint = Vector2.new(1, 1),
+    Position = UDim2.new(1, -205, 1, -118),
+    Size = UDim2.fromOffset(94, 144),
+    BackgroundTransparency = 1,
+    Visible = UIS.TouchEnabled and state.minimized,
+    ZIndex = 45
+}, gui)
+
+local quickGrid = create("UIGridLayout", {
+    CellSize = UDim2.fromOffset(44, 44),
+    CellPadding = UDim2.fromOffset(6, 6),
+    FillDirectionMaxCells = 2,
+    SortOrder = Enum.SortOrder.LayoutOrder
+}, quickActions)
+
+local function quickButton(label, order, callback)
+    local b = create("TextButton", {
+        Name = "Quick" .. label,
+        Size = UDim2.fromOffset(44, 44),
+        BackgroundColor3 = C.card,
+        Text = label,
+        TextColor3 = C.light,
+        Font = Enum.Font.GothamBold,
+        TextSize = 9,
+        AutoButtonColor = false,
+        Active = true,
+        Selectable = true,
+        LayoutOrder = order,
+        ZIndex = 46
+    }, quickActions)
+    corner(b, 100)
+    local edge = outline(b, C.blue, 1.5)
+    b.Activated:Connect(function()
+        local ok, err = pcall(callback)
+        if not ok then
+            notify("Quick action failed: " .. tostring(err), "error")
+        end
+        if label == "SPR" then
+            b.TextColor3 = state.sprinting and C.green or C.light
+            edge.Color = state.sprinting and C.green or C.blue
+        elseif label == "SPEC" then
+            b.TextColor3 = state.spectating and C.green or C.light
+            edge.Color = state.spectating and C.green or C.blue
+        elseif label == "HIDE" then
+            b.TextColor3 = state.remoteHide and C.green or C.light
+            edge.Color = state.remoteHide and C.green or C.blue
+        end
+    end)
+    return b
+end
+
+quickButton("DASH", 1, dashCharacter)
+quickButton("SPR", 2, function()
+    state.sprinting = not state.sprinting
+    applyMovement()
+    notify("Sprint: " .. (state.sprinting and "ON" or "OFF"), "success")
+end)
+quickButton("SPEC", 3, openSpectatePicker)
+quickButton("RST", 4, resetCharacter)
+quickRemoteButton = quickButton("HIDE", 5, function()
+    setRemoteHide(not state.remoteHide)
+end)
+refreshRemoteHideUI()
+
+--==================================================
+-- REMOTE CAMERA INPUT
+-- Roblox's default CameraModule now handles mouse/touch look and zoom.
+-- The default ControlModule supplies movement input for the virtual anchor.
+--==================================================
+
+--==================================================
+-- INPUT HANDLING
+--==================================================
+
+connect(UIS.InputBegan, function(input, processed)
+    if state.closed then return end
+
+    if capturingKey
+        and input.UserInputType == Enum.UserInputType.Keyboard then
+
+        if input.KeyCode == Enum.KeyCode.Escape then
+            capturingKey = false
+            notify("Key capture cancelled.")
+        else
+            settings.keybind = input.KeyCode.Name
+            capturingKey = false
+
+            saveSettings()
+            notify("Toggle key set to " .. settings.keybind, "success")
+            selectTab("Settings")
+        end
+
+        return
+    end
+
+    if processed or UIS:GetFocusedTextBox() then
+        return
+    end
+
+    if input.UserInputType == Enum.UserInputType.Keyboard
+        and input.KeyCode.Name == settings.keybind then
+
+        if state.minimized or not main.Visible then
+            restore()
+        else
+            minimize()
+        end
+    end
+end)
+
+connect(UIS.JumpRequest, function()
+    if state.infiniteJump then
+        local h = humanoid()
+
+        if h then
+            h:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+    end
+end)
+
+--==================================================
+-- SERVER TELEPORT RETRIES
+--==================================================
+
+connect(TeleportService.TeleportInitFailed, function(failedPlayer, result, errorMessage, placeId)
+    if failedPlayer ~= player or state.closed then return end
+    local request = lastServerTeleport
+    if not request or placeId ~= request.placeId then return end
+
+    if request.attempts < 3 and not request.retryQueued then
+        request.retryQueued = true
+        notify("Teleport failed (" .. tostring(result) .. "). Retrying...", "error")
+        task.delay(1.5, function()
+            if state.closed or lastServerTeleport ~= request then return end
+            attemptServerTeleport(request)
+        end)
+    else
+        notify("Teleport could not start: " .. tostring(errorMessage), "error")
+    end
+end)
+
+--==================================================
+-- PLAYER LIST EVENTS
+--==================================================
+
+connect(Players.PlayerAdded, function()
+    if activePlayerRefresh then
+        activePlayerRefresh()
+    end
+end)
+
+connect(Players.PlayerRemoving, function(leaving)
+    if selectedPlayer == leaving then
+        selectedPlayer = nil
+
+        if state.spectating then
+            stopSpectating()
+        end
+    end
+
+    if activePlayerRefresh then
+        activePlayerRefresh()
+    end
+end)
+
+--==================================================
+-- CHAT AUTO REPLY
+--==================================================
+
+connect(TextChatService.MessageReceived, function(message)
+    if not state.autoChat or state.closed then return end
+
+    local source = message.TextSource
+
+    if not source or source.UserId == player.UserId then
+        return
+    end
+
+    local keyword = string.lower(settings.replyKeyword or "")
+    local reply = settings.replyText or ""
+
+    if keyword == "" or reply == "" then
+        return
+    end
+
+    if not string.lower(message.Text):find(keyword, 1, true) then
+        return
+    end
+
+    if os.clock() - lastReply < settings.chatCooldown then
+        return
+    end
+
+    lastReply = os.clock()
+
+    local channel = getGeneralChannel()
+
+    if channel then
+        pcall(function()
+            channel:SendAsync(reply)
+        end)
+    end
+end)
+
+--==================================================
+-- CHARACTER RESPAWN
+--==================================================
+
+connect(player.CharacterAdded, function()
+    task.wait(0.35)
+
+    if state.closed then return end
+
+    local h = humanoid()
+
+    if h then
+        captureMovement(h)
+        if not state.remoteHide then
+            applyMovement()
+        end
+    end
+
+    if state.remoteHide then
+        local newCharacter = character()
+        if newCharacter and remoteHideData then
+            local remoteRoot = newCharacter:WaitForChild("HumanoidRootPart", 5)
+            local remoteHumanoid = newCharacter:WaitForChild("Humanoid", 5)
+            if remoteRoot and remoteHumanoid then
+                applyRemoteHoldToCharacter(newCharacter)
+                local currentCamera = workspace.CurrentCamera
+                if currentCamera and remoteCameraAnchor and remoteCameraAnchor.Parent then
+                    currentCamera.CameraType = Enum.CameraType.Custom
+                    currentCamera.CameraSubject = remoteCameraAnchor
+                end
+                refreshRemoteHideUI()
+            end
+        end
+    end
+
+    if state.noclip then
+        setNoclip(true)
+    end
+
+    if state.invisible then
+        setInvisible(true)
+    end
+
+    if state.spectating then
+        stopSpectating()
+    end
+
+    flyVertical = 0
+    task.defer(ensureTeleportTool)
+end)
+
+--==================================================
+-- RENDER / MOVEMENT UPDATE
+--==================================================
+
+local function updateFlyControls()
+    local visible = state.flying and not state.closed
+
+    flyUp.Visible = visible
+    flyDown.Visible = visible
+end
+
+connect(RunService.RenderStepped, function(dt)
+    if state.closed then return end
+
+    updateFlyControls()
+
+    -- Decorative animations
+    if settings.animations
+        and not settings.reduceMotion
+        and settings.borderAnimation then
+
+        local rate = settings.performanceMode and 0.08 or 0.03
+
+        if os.clock() - lastAnimationUpdate >= rate then
+            lastAnimationUpdate = os.clock()
+            animationTime += dt * settings.animationSpeed
+
+            local pulse = (math.sin(animationTime) + 1) / 2
+
+            local color = C.blue:Lerp(C.light, pulse * 0.42)
+
+            mainStroke.Color = color
+            logoStroke.Color = color
+            floatingStroke.Color = color
+
+            if settings.floatingAnimation and floating.Visible then
+                floatingCircle.BackgroundColor3 =
+                    C.panel:Lerp(C.card, pulse * 0.25)
+            end
+        end
+    else
+        mainStroke.Color = C.blue
+        logoStroke.Color = C.blue
+        floatingStroke.Color = C.blue
+    end
+
+    -- Move the virtual player anchor using Roblox's native input vector.
+    -- The default camera controller handles camera rotation, touch gestures and zoom.
+    if state.remoteHide and remoteHideData and remoteCameraAnchor and remoteCameraAnchor.Parent then
+        local camera = workspace.CurrentCamera
+        local moveVector = Vector3.zero
+
+        if not remotePlayerControls then
+            getRemotePlayerControls()
+        end
+
+        if remotePlayerControls then
+            local ok, value = pcall(function()
+                return remotePlayerControls:GetMoveVector()
+            end)
+            if ok and typeof(value) == "Vector3" then
+                moveVector = value
+            end
+        end
+
+        -- Keyboard fallback if the default controls module is unavailable.
+        if moveVector.Magnitude < 0.001 then
+            if UIS:IsKeyDown(Enum.KeyCode.W) then moveVector += Vector3.new(0, 0, -1) end
+            if UIS:IsKeyDown(Enum.KeyCode.S) then moveVector += Vector3.new(0, 0, 1) end
+            if UIS:IsKeyDown(Enum.KeyCode.D) then moveVector += Vector3.new(1, 0, 0) end
+            if UIS:IsKeyDown(Enum.KeyCode.A) then moveVector += Vector3.new(-1, 0, 0) end
+        end
+
+        if camera then
+            local worldMove
+
+            if moveVector.Magnitude > 0.001 then
+                -- Match Roblox's own camera-relative movement conversion, including
+                -- when the camera is looking almost straight up or down.
+                local _, _, _, R00, R01, R02, _, _, R12, _, _, R22 = camera.CFrame:GetComponents()
+                local c, sn
+
+                if R12 < 1 and R12 > -1 then
+                    c = R22
+                    sn = R02
+                else
+                    c = R00
+                    sn = -R01 * math.sign(R12)
+                end
+
+                local norm = math.sqrt(c * c + sn * sn)
+                if norm > 0.001 then
+                    worldMove = Vector3.new(
+                        (c * moveVector.X + sn * moveVector.Z) / norm,
+                        0,
+                        (c * moveVector.Z - sn * moveVector.X) / norm
+                    )
+                end
+            else
+                -- Fallback for games with a customized PlayerModule: MoveDirection
+                -- is already expressed in world space by Roblox's Humanoid.
+                local activeHumanoid = humanoid()
+                if activeHumanoid and activeHumanoid.MoveDirection.Magnitude > 0.001 then
+                    worldMove = Vector3.new(
+                        activeHumanoid.MoveDirection.X,
+                        0,
+                        activeHumanoid.MoveDirection.Z
+                    )
+                end
+            end
+
+            if worldMove and worldMove.Magnitude > 0.001 then
+                if worldMove.Magnitude > 1 then worldMove = worldMove.Unit end
+
+                local movementSpeed = state.sprinting and settings.sprint or settings.speed
+                local currentPosition = remoteCameraAnchor.Position
+                local desiredPosition = currentPosition + worldMove * movementSpeed * dt
+                local anchorOrigin = remoteHideData.anchorOrigin or remoteHideData.startCFrame.Position
+
+                -- Keep the virtual player close to the original area.
+                local offset = desiredPosition - anchorOrigin
+                if offset.Magnitude > remoteCameraRadius then
+                    desiredPosition = anchorOrigin + offset.Unit * remoteCameraRadius
+                end
+
+                -- Avoid moving the virtual anchor directly through solid walls.
+                local delta = desiredPosition - currentPosition
+                if delta.Magnitude > 0.001 then
+                    local params = RaycastParams.new()
+                    params.FilterType = Enum.RaycastFilterType.Exclude
+                    params.FilterDescendantsInstances = {character(), remoteCameraAnchor}
+                    local wall = workspace:Raycast(currentPosition + Vector3.new(0, 2, 0), delta, params)
+                    if wall and wall.Instance then
+                        local canCollide = false
+                        pcall(function() canCollide = wall.Instance.CanCollide end)
+                        if canCollide then
+                            desiredPosition = currentPosition
+                        end
+                    end
+                end
+
+                remoteCameraAnchor.Position = desiredPosition
+            end
+        end
+    end
+
+    -- Character movement
+    local h = humanoid()
+    local r = root()
+
+    if h and r and not state.remoteHide then
+        if not state.flying then
+            local desiredSpeed
+
+            if h:GetState() == Enum.HumanoidStateType.Swimming then
+                desiredSpeed = settings.swimSpeed
+            elseif state.sprinting then
+                desiredSpeed = settings.sprint
+            else
+                desiredSpeed = settings.speed
+            end
+
+            if math.abs(h.WalkSpeed - desiredSpeed) > 0.1 then
+                h.WalkSpeed = desiredSpeed
+            end
+        end
+
+        if state.flying then
+            h:ChangeState(Enum.HumanoidStateType.Physics)
+
+            local vertical = flyVertical
+
+            if UIS:IsKeyDown(Enum.KeyCode.Space) then
+                vertical = 1
+            elseif UIS:IsKeyDown(Enum.KeyCode.LeftControl) then
+                vertical = -1
+            end
+
+            local direction = h.MoveDirection
+            local movement = direction * settings.flySpeed
+
+            r.AssemblyLinearVelocity = Vector3.new(
+                movement.X,
+                vertical * settings.flySpeed,
+                movement.Z
+            )
+        end
+    end
+
+    -- Keep the spectator camera connected to the selected target
+    if state.spectating and selectedPlayer
+        and os.clock() - lastSpectateUpdate >= 0.25 then
+
+        lastSpectateUpdate = os.clock()
+
+        local camera = workspace.CurrentCamera
+        local targetHumanoid = selectedPlayer.Character
+            and selectedPlayer.Character:FindFirstChildOfClass("Humanoid")
+
+        if camera and targetHumanoid then
+            camera.CameraSubject = targetHumanoid
+        elseif not targetHumanoid then
+            stopSpectating()
+        end
+    end
+end)
+
+--==================================================
+-- CLEANUP
+--==================================================
+
+local function cleanup()
+    if state.closed then return end
+
+    if state.remoteHide then
+        setRemoteHide(false, true)
+    end
+
+    state.closed = true
+
+    state.flying = false
+    state.sprinting = false
+    state.infiniteJump = false
+    state.autoChat = false
+    state.following = false
+
+    flyVertical = 0
+
+    if noclipConnection then
+        noclipConnection:Disconnect()
+        noclipConnection = nil
+    end
+
+    if invisibleConnection then
+        invisibleConnection:Disconnect()
+        invisibleConnection = nil
+    end
+
+    for part, oldValue in pairs(collisionCache) do
+        if part.Parent then
+            part.CanCollide = oldValue
+        end
+    end
+
+    table.clear(collisionCache)
+
+    for part, oldValue in pairs(transparencyCache) do
+        if part.Parent then
+            part.LocalTransparencyModifier = oldValue
+        end
+    end
+
+    table.clear(transparencyCache)
+
+    workspace.Gravity = originalGravity
+
+    player.CameraMinZoomDistance = originalMinZoom
+    player.CameraMaxZoomDistance = originalMaxZoom
+
+    local h = humanoid()
+
+    if h then
+        local saved = movementOriginals[h]
+
+        if saved then
+            h.WalkSpeed = saved.speed
+            h.JumpPower = saved.jump
+            h.UseJumpPower = saved.useJump
+        end
+
+        h:ChangeState(Enum.HumanoidStateType.GettingUp)
+    end
+
+    local camera = workspace.CurrentCamera
+
+    if camera then
+        camera.FieldOfView = originalFov or defaults.fov
+
+        if originalCameraSubject and originalCameraSubject.Parent then
+            camera.CameraSubject = originalCameraSubject
+        else
+            camera.CameraSubject = h
+        end
+    end
+
+    if viewportConnection then
+        viewportConnection:Disconnect()
+        viewportConnection = nil
+    end
+
+    if teleportToolConnection then
+        teleportToolConnection:Disconnect()
+        teleportToolConnection = nil
+    end
+
+    if teleportTool and teleportTool.Parent then
+        teleportTool:Destroy()
+        teleportTool = nil
+    end
+    if previewSound then
+        previewSound:Stop()
+        previewSound:Destroy()
+        previewSound = nil
+    end
+    if remoteHideData and remoteHideData.mouseBehavior then
+        UIS.MouseBehavior = remoteHideData.mouseBehavior
+    end
+    if remoteCameraAnchor and remoteCameraAnchor.Parent then
+        remoteCameraAnchor:Destroy()
+    end
+    remoteCameraAnchor = nil
+    closeSpectatePicker()
+
+    for _, connection in ipairs(connections) do
+        pcall(function()
+            connection:Disconnect()
+        end)
+    end
+
+    table.clear(connections)
+end
+
+gui.Destroying:Connect(cleanup)
+
+--==================================================
+-- INITIALIZATION
+--==================================================
+
+buildTheme()
+
+main.BackgroundColor3 = C.bg
+main.BackgroundTransparency = settings.transparency
+
+sidebar.BackgroundColor3 = C.side
+
+logo.BackgroundColor3 = C.panel
+floatingCircle.BackgroundColor3 = C.panel
+
+mainStroke.Color = C.blue
+logoStroke.Color = C.blue
+floatingStroke.Color = C.blue
+
+player.CameraMinZoomDistance = settings.zoomMin
+player.CameraMaxZoomDistance = settings.zoomMax
+
+if workspace.CurrentCamera then
+    workspace.CurrentCamera.FieldOfView = settings.fov
+end
+
+workspace.Gravity = settings.gravity
+
+applyMovement()
+applyTextSettings()
+resizePanel()
+ensureTeleportTool()
+
+selectTab("Dashboard")
+
+print("N45d Panel v5.4 loaded.")
